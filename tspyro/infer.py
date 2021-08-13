@@ -11,9 +11,7 @@ from . import geography
 from . import model
 
 
-def infer_pyro(
-    ts, priors, leaf_location=None, Ne=10000, mutation_rate=1e-8, steps=1001
-):
+def infer_pyro(ts, priors, leaf_location, Ne=10000, mutation_rate=1e-8, steps=1001):
 
     pyro.set_rng_seed(20210518)
     pyro.clear_param_store()
