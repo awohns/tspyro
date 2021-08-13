@@ -1,7 +1,15 @@
+import itertools
+import operator
+
 import numpy as np
 import pyro
 import pyro.distributions as dist
 import torch
+from pyro import poutine
+from pyro.infer import SVI
+from pyro.infer import Trace_ELBO
+from pyro.infer.autoguide import AutoNormal
+from pyro.infer.autoguide import init_to_median
 from pyro.nn import PyroModule
 
 
@@ -33,14 +41,11 @@ class NaiveModel(PyroModule):
         # conditional coalescent prior
         timepoints = torch.as_tensor(prior.timepoints, dtype=torch.float)
         timepoints = timepoints.mul(2 * Ne).log1p()
-        # timepoints = timepoints.clamp(min=0)
         grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.float)
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
         deltas = (timepoints - self.prior_loc[:, None]) ** 2
         self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
-        # self.prior_loc += math.log(Ne)
-        # GEOGRAPHY
         self.leaf_location = leaf_location
 
     def get_mut_edges(self):
@@ -68,6 +73,80 @@ class NaiveModel(PyroModule):
                     mut_edges[edge_id] += 1
         return mut_edges
 
+    def weighted_geographic_center(self, lat_list, long_list, weights):
+        x = list()
+        y = list()
+        z = list()
+        if len(lat_list) == 1 and len(long_list) == 1:
+            return (lat_list[0], long_list[0])
+        lat_radians = np.radians(lat_list)
+        long_radians = np.radians(long_list)
+        x = np.cos(lat_radians) * np.cos(long_radians)
+        y = np.cos(lat_radians) * np.sin(long_radians)
+        z = np.sin(lat_radians)
+        weights = np.array(weights)
+        central_latitude, central_longitude = self.radians_center_weighted(
+            x, y, z, weights
+        )
+        return (np.degrees(central_latitude), np.degrees(central_longitude))
+
+    def edges_by_parent_asc(self, ts):
+        """
+        Return an itertools.groupby object of edges grouped by parent in ascending order
+        of the time of the parent. Since tree sequence properties guarantee that edges
+        are listed in nondecreasing order of parent time
+        (https://tskit.readthedocs.io/en/latest/data-model.html#edge-requirements)
+        we can simply use the standard edge order
+        """
+        return itertools.groupby(ts.edges(), operator.attrgetter("parent"))
+
+    def edge_span(self, edge):
+        return edge.right - edge.left
+
+    def average_edges(self, parent_edges, locations):
+        parent = parent_edges[0]
+        edges = parent_edges[1]
+
+        child_spanfracs = list()
+        child_lats = list()
+        child_longs = list()
+
+        for edge in edges:
+            child_spanfracs.append(self.edge_span(edge))
+            child_lats.append(locations[edge.child][0])
+            child_longs.append(locations[edge.child][1])
+        val = self.weighted_geographic_center(
+            child_lats, child_longs, np.ones_like(len(child_lats))
+        )
+        return parent, val
+
+    def radians_center_weighted(self, x, y, z, weights):
+        total_weight = np.sum(weights)
+        weighted_avg_x = np.sum(weights * np.array(x)) / total_weight
+        weighted_avg_y = np.sum(weights * np.array(y)) / total_weight
+        weighted_avg_z = np.sum(weights * np.array(z)) / total_weight
+        central_longitude = np.arctan2(weighted_avg_y, weighted_avg_x)
+        central_square_root = np.sqrt(
+            weighted_avg_x * weighted_avg_x + weighted_avg_y * weighted_avg_y
+        )
+        central_latitude = np.arctan2(weighted_avg_z, central_square_root)
+        return central_latitude, central_longitude
+
+    def get_ancestral_geography(self, ts, sample_locations, show_progress=False):
+        """
+        Use dynamic programming to find approximate posterior to sample from
+        """
+        locations = np.zeros((ts.num_nodes, 2))
+        locations[ts.samples()] = sample_locations
+        fixed_nodes = set(ts.samples())
+
+        # Iterate through the nodes via groupby on parent node
+        for parent_edges in self.edges_by_parent_asc(ts):
+            if parent_edges[0] not in fixed_nodes:
+                parent, val = self.average_edges(parent_edges, locations)
+                locations[parent] = val
+        return torch.tensor(locations[ts.num_samples :])  # noqa
+
     def forward(self):
         # First sample times from an improper uniform distribution which we denote
         # via .mask(False). Note only the internal nodes are sampled; leaves are
@@ -92,20 +171,14 @@ class NaiveModel(PyroModule):
 
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
-        # trying a different link function, exp in left tail, linear in right tail
-        # internal_time = torch.nn.functional.softplus(unconstr_internal_time)
-        # internal_time = torch.tensor(internal_time, dtype=torch.float)
         internal_time = internal_time  # * self.Ne
         time = torch.zeros((self.num_nodes,))
         time[self.is_internal] = internal_time
-        # time = torch.tensor(sample_ts.tables.nodes.time)
-        # GEOGRAPHY.
         # Should we be Bayesian about migration scale, or should it be fixed?
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(-5, 1))
 
         # Next add a factor for time gaps between parents and children.
         gap = time[self.parent] - time[self.child]
-        # print("MIG SCALE:", float(migration_scale), "GAP:", float(gap.mean()))
         with pyro.plate("edges", len(gap)):
 
             rate = (gap * self.span * self.mutation_rate).clamp(min=1e-8)
@@ -133,11 +206,61 @@ class NaiveModel(PyroModule):
                     "migration",
                     # Trying a heavy-tailed distribution
                     dist.Exponential(1 / migration_radius),
-                    obs=distance
-                    # dist.Normal(torch.zeros_like(parent_location),
-                    # migration_radius.unsqueeze(-1)).to_event(1),
-                    # obs=child_location - parent_location,
+                    obs=distance,
                 )
             else:
                 location = torch.ones(self.ts.num_nodes)
         return time, gap, location, migration_scale
+
+
+def guide(ts, leaf_location, priors, Ne=10000, mutation_rate=1e-8, steps=1001):
+
+    pyro.set_rng_seed(20210518)
+    pyro.clear_param_store()
+
+    model = NaiveModel(
+        ts,
+        leaf_location=leaf_location,
+        prior=priors,
+        Ne=Ne,
+        mutation_rate=mutation_rate,
+    )
+
+    def init_loc_fn(site):
+        if site["name"] == "internal_time":
+            prior_init = np.einsum(
+                "t,nt->n", priors.timepoints, (priors.grid_data[:])
+            ) / np.sum(priors.grid_data[:], axis=1)
+            internal_time = torch.as_tensor(prior_init, dtype=torch.float)  # / Ne
+            return internal_time.clamp(min=0.1)
+        # GEOGRAPHY.
+        if site["name"] == "internal_location":
+            initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
+            return initial_guess_loc
+        return init_to_median(site)
+
+    guide = AutoNormal(
+        model, init_scale=0.01, init_loc_fn=init_loc_fn
+    )  # Mean field (fully Bayesian)
+    optim = pyro.optim.ClippedAdam({"lr": 0.005, "lrd": 0.1 ** (1 / max(1, steps))})
+    svi = SVI(model, guide, optim, Trace_ELBO())
+    guide()  # initialises the guide
+    losses = []
+    migration_scales = []
+    for step in range(steps):
+        loss = svi.step() / ts.num_nodes
+        losses.append(loss)
+        if step % 100 == 0:
+            with torch.no_grad():
+                median = (
+                    guide.median()
+                )  # assess convergence of migration scale parameter
+                migration_scale = float(median["migration_scale"])
+                migration_scales.append(migration_scale)
+            print(
+                f"step {step} loss = {loss:0.5g}, "
+                f"Migration scale= {migration_scale:0.3g}"
+            )
+    median = guide.median()
+    pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
+    return pyro_time, location, migration_scale, guide
