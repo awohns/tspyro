@@ -1,0 +1,8 @@
+tskit
+pyro
+numpy
+tqdm
+codecov
+pytest-cov
+pre-commit
+flake8
