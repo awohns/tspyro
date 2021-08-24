@@ -15,6 +15,7 @@ setup(
     setup_requires=["setuptools_scm"],
     install_requires=[
         "tskit>=0.3.0",
+        "tsdate",
         "flake8",
         "mypy>=0.812",
         "numpy",

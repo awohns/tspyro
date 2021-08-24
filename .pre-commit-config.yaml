@@ -41,5 +41,6 @@ repos:
     rev: '44afb68a9695d04030edc5cdc5a4fc4f17e4f9e2'
     hooks:
       - id: mypy
+        pass_filenames: False
         args: ["tspyro"]
         language_version: python3
