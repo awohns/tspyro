@@ -23,6 +23,7 @@ setup(
         "flake8",
         "numpy",
         "networkx",
+        "pyro-ppl>=1.7",
         "pytest",
         "pandas",
     ],
