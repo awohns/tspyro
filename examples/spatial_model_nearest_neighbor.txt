@@ -1,0 +1,46 @@
+// Keywords: continuous space, continuous spatial landscape, reprising boundaries
+
+initialize() {
+	initializeSLiMOptions(dimensionality="xy");
+	initializeTreeSeq();
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+	
+
+	// spatial mate choice
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=0.1);
+}
+1 late() {
+	sim.addSubpop("p1", 500);
+	p1.individuals.setSpatialPosition(p1.pointUniform(500));
+}
+1: late() {
+	
+	i2.evaluate();
+}
+late() {
+   sim.treeSeqRememberIndividuals(p1.individuals, permanent=F);
+}
+1: mateChoice() {
+	// nearest-neighbor spatial mate choice
+	neighbors = i2.nearestNeighbors(individual, 3);
+	return (size(neighbors) ? sample(neighbors, 1) else float(0));
+}
+modifyChild() {
+	do pos = parent1.spatialPosition + rnorm(2, 0, 0.02);
+	while (!p1.pointInBounds(pos));
+	child.setSpatialPosition(pos);
+	
+	return T;
+}
+
+2000 late() {
+	sim.outputFixedMutations();
+   sim.treeSeqOutput("spatial_sim.trees");
+   catn("Done.");
+   sim.simulationFinished();
+}
+
