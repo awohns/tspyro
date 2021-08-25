@@ -1,6 +1,8 @@
 import math
+from typing import Optional
 
 import torch
+from pyro.distributions import TorchDistribution
 from torch.distributions import constraints
 
 
@@ -70,3 +72,51 @@ class ApproximateMatrixExponential:
         state = (t1 - t) * state + (t - t0) * state @ self.transitions[0]
 
         return state
+
+
+class WaypointDiffusion2D(TorchDistribution):
+    arg_constraints = {"source": constraints.real_vector}
+    support = constraints.real_vector
+
+    def __init__(
+        self,
+        source: torch.Tensor,
+        time: torch.Tensor,
+        radius: torch.Tensor,
+        waypoints: torch.Tensor,
+        matrix_exp: ApproximateMatrixExponential,
+        validate_args: Optional[bool] = None,
+    ):
+        assert source.dim() >= 1
+        assert source.size(-1) == 2
+        radius = torch.as_tensor(radius, dtype=source.dtype)
+        assert radius.shape == ()
+        assert waypoints.dim() == 2
+        self.source = source
+        self.time = time
+        self.radius = radius
+        self.waypoints = waypoints
+        self.matrix_exp = matrix_exp
+        super().__init__(
+            batch_shape=source.shape[:-1],
+            event_shape=source.shape[-1:],
+            validate_args=validate_args,
+        )
+
+    def _waypoint_logp(self, position: torch.Tensor) -> torch.Tensor:
+        assert position.size(-1) == 2
+        r = torch.cdist(position, self.waypoints)
+        return (
+            -math.log(2 * math.pi)
+            - self.radius.log()
+            - 0.5 * (r / self.radius).square()
+        )
+
+    def log_prob(self, destin: torch.Tensor) -> torch.Tensor:
+        finfo = torch.finfo(destin.dtype)
+        source_logp = self._waypoint_logp(self.source)
+        source_logp = source_logp - source_logp.logsumexp(-1, True)
+        source_prob = source_logp.exp()
+        destin_prob = self.matrix_exp(self.time, source_prob).clamp(min=finfo.tiny)
+        destin_logp = destin_prob.log() + self._waypoint_logp(destin)
+        return destin_logp.logsumexp(-1)

@@ -2,6 +2,7 @@ import pytest
 import scipy
 import torch
 from tspyro.diffusion import ApproximateMatrixExponential
+from tspyro.diffusion import WaypointDiffusion2D
 
 
 @pytest.mark.parametrize("batch_shape", [(), (5,), (2, 3)], ids=str)
@@ -20,4 +21,36 @@ def test_matrix_exp(dim, batch_shape):
         power = torch.as_tensor(power, dtype=init.dtype)
         expected = init @ power
         assert actual.shape == expected.shape
-        assert torch.allclose(actual, expected, atol=0.3 / (1 + t)), (actual, expected)
+        assert torch.allclose(actual, expected, atol=0.5 / (1 + t)), (actual, expected)
+
+
+@pytest.mark.parametrize(
+    "batch_time",
+    [
+        False,
+        pytest.param(True, marks=pytest.mark.xfail(reason="not implemented")),
+    ],
+)
+def test_waypoint_diffusion_smoke(batch_time):
+    batch_shape = (11,)
+    X, Y = 4, 5
+    XY = X * Y
+    waypoints = torch.stack(
+        [
+            torch.arange(float(X))[:, None].expand((X, Y)).reshape(-1),
+            torch.arange(float(Y)).expand((X, Y)).reshape(-1),
+        ],
+        dim=-1,
+    )
+    source = torch.randn(batch_shape + (2,)) + 2
+    destin = torch.randn(batch_shape + (2,)) + 2
+    time = 10.0 * torch.randn(batch_shape if batch_time else ()).exp()
+    radius = 1.0
+    transition = torch.rand(XY, XY)
+    transition /= transition.sum(-1, True)
+    matrix_exp = ApproximateMatrixExponential(transition)
+
+    d = WaypointDiffusion2D(source, time, radius, waypoints, matrix_exp)
+    actual = d.log_prob(destin)
+    assert torch.isfinite(actual).all()
+    assert actual.shape == batch_shape
