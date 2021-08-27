@@ -76,6 +76,8 @@ class ApproximateMatrixExponential:
 
 class WaypointDiffusion2D(TorchDistribution):
     """
+    Likelihood for nonuniform migration with continuous-valued location.
+
     Example::
 
         class Model:
@@ -87,7 +89,7 @@ class WaypointDiffusion2D(TorchDistribution):
                 # This cheaply precomputes some matrices.
                 self.matrix_exp = ApproximateMatrixExponential(...)
 
-            # Then this
+            # Then use this distribution as a likelihood each step.
             def forward(self):
                 ...
                 # Concatenate observed and latent states.
@@ -111,6 +113,23 @@ class WaypointDiffusion2D(TorchDistribution):
                         ),
                         obs=location[edges.child],
                     )
+
+    :param torch.Tensor source: A ``batch_shape + (2,)`` shaped tensor of
+        2D-locations, optionally batched over individual (``batch_shape`` may
+        be the empty tuple).
+    :param torch.Tensor time: A continuous-valued time between source and
+        destination. This may be scalar or batched over ``batch_shape``.
+    :param torch.Tensor radius: The Gaussian standard deviation around each
+        waypoint, determining how far from each waypoint an individual may
+        stray. This must be sufficiently large that there is some ambiguity
+        which waypoint an individual is near, otherwise inference may get
+        stuck. This may be either a scalar or batched over waypoints.
+    :param torch.Tensor waypoints: A ``(num_waypoints, 2)`` shaped tensor of
+        positions of waypoints.
+    :param ApproximateMatrixExponential matrix_exp: An matrix exponential
+        instance that is typically computed once before learning and shared
+        across inference step, thereby amortizing some computation.
+    :param bool validate_args: Whether to validate inputs.
     """
 
     arg_constraints = {"source": constraints.real_vector}
@@ -123,12 +142,13 @@ class WaypointDiffusion2D(TorchDistribution):
         radius: torch.Tensor,
         waypoints: torch.Tensor,
         matrix_exp: ApproximateMatrixExponential,
+        *,
         validate_args: Optional[bool] = None,
     ):
         assert source.dim() >= 1
         assert source.size(-1) == 2
-        radius = torch.as_tensor(radius, dtype=source.dtype)
-        assert radius.shape == ()
+        radius = torch.as_tensor(radius, dtype=waypoints.dtype)
+        assert radius.shape == () or radius.shape == waypoints.shape[:1]
         assert waypoints.dim() == 2
         self.source = source
         self.time = time

@@ -31,7 +31,8 @@ def test_matrix_exp(dim, batch_shape):
         pytest.param(True, marks=pytest.mark.xfail(reason="not implemented")),
     ],
 )
-def test_waypoint_diffusion_smoke(batch_time):
+@pytest.mark.parametrize("batch_radius", [False, True])
+def test_waypoint_diffusion_smoke(batch_time, batch_radius):
     batch_shape = (11,)
     X, Y = 4, 5
     XY = X * Y
@@ -45,7 +46,7 @@ def test_waypoint_diffusion_smoke(batch_time):
     source = torch.randn(batch_shape + (2,)) + 2
     destin = torch.randn(batch_shape + (2,)) + 2
     time = 10.0 * torch.randn(batch_shape if batch_time else ()).exp()
-    radius = 1.0
+    radius = torch.rand(len(waypoints)) if batch_radius else 1.0
     transition = torch.rand(XY, XY)
     transition /= transition.sum(-1, True)
     matrix_exp = ApproximateMatrixExponential(transition)
