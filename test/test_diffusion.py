@@ -24,13 +24,7 @@ def test_matrix_exp(dim, batch_shape):
         assert torch.allclose(actual, expected, atol=0.5 / (1 + t)), (actual, expected)
 
 
-@pytest.mark.parametrize(
-    "batch_time",
-    [
-        False,
-        pytest.param(True, marks=pytest.mark.xfail(reason="not implemented")),
-    ],
-)
+@pytest.mark.parametrize("batch_time", [False, True])
 @pytest.mark.parametrize("batch_radius", [False, True])
 def test_waypoint_diffusion_smoke(batch_time, batch_radius):
     batch_shape = (11,)

@@ -53,23 +53,26 @@ class ApproximateMatrixExponential:
         but this supports fractional matrix powers, differentiably.
         """
         assert density.size(-1) == self.transitions.size(-1)
-        t = torch.as_tensor(t, dtype=density.dtype)
-        if t.dim():
-            raise NotImplementedError("t cannot currently be batched")
-        t0 = int(t.detach())
-        t1 = 1 + t0
+        t = torch.as_tensor(t, dtype=density.dtype).abs()
 
         # Compute transition up to t0.
-        bits = list(map(int, reversed(bin(t0)[2:])))
-        if len(bits) > len(self.transitions):
-            raise ValueError(f"Time {t} exceeded max_time_step")  # TODO
+        t0 = t.detach().floor()
         state = density
-        for b, transition in zip(bits, self.transitions):
-            if b:
-                state = state @ transition
+        bits = t0.long()
+        pow2 = 0
+        while bits.any():
+            if pow2 >= len(self.transitions):
+                raise ValueError(
+                    f"Time {float(t.max())} is too large; increase max_time_step"
+                )
+            transition = self.transitions[pow2]
+            state = torch.where((bits & 1).bool()[..., None], state @ transition, state)
+            bits >>= 1
+            pow2 += 1
 
         # Interpolate from t0 up to t, supporting differentiation through t.
-        state = (t1 - t) * state + (t - t0) * state @ self.transitions[0]
+        transition = self.transitions[0]
+        state = state + (t - t0)[..., None] * (state @ transition - state)
 
         return state
 
@@ -147,6 +150,7 @@ class WaypointDiffusion2D(TorchDistribution):
     ):
         assert source.dim() >= 1
         assert source.size(-1) == 2
+        time = torch.as_tensor(time, dtype=source.dtype)
         radius = torch.as_tensor(radius, dtype=waypoints.dtype)
         assert radius.shape == () or radius.shape == waypoints.shape[:1]
         assert waypoints.dim() == 2
