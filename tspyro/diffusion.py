@@ -75,6 +75,44 @@ class ApproximateMatrixExponential:
 
 
 class WaypointDiffusion2D(TorchDistribution):
+    """
+    Example::
+
+        class Model:
+            # First compute a few static pieces of data.
+            def __init__(self, ...):
+                # These define the geography.
+                self.waypoint_radius = ...
+                self.waypoints = ...
+                # This cheaply precomputes some matrices.
+                self.matrix_exp = ApproximateMatrixExponential(...)
+
+            # Then this
+            def forward(self):
+                ...
+                # Concatenate observed and latent states.
+                # Note both locations and times may be latent variables.
+                locations = torch.cat([
+                    leaf_locations,      # observed
+                    internal_locations,  # latent
+                ], dim-2)
+                times = torch.cat([leaf_times, internal_times], dim=-1)
+
+                # Add a likelihood term for migration.
+                with pyro.plate("edges", num_edges):
+                    pyro.sample(
+                        "migration",
+                        WaypointDiffusion2D(
+                            source=location[edges.parent],
+                            time=times[edges.child] - times[edges.parent],
+                            radius=self.waypoint_radius,
+                            waypoints=self.waypoints,
+                            matrix_exp=self.matrix_exp,
+                        ),
+                        obs=location[edges.child],
+                    )
+    """
+
     arg_constraints = {"source": constraints.real_vector}
     support = constraints.real_vector
 
