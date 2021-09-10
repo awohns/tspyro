@@ -182,3 +182,36 @@ class WaypointDiffusion2D(TorchDistribution):
         destin_prob = self.matrix_exp(self.time, source_prob).clamp(min=finfo.tiny)
         destin_logp = destin_prob.log() + self._waypoint_logp(destin)
         return destin_logp.logsumexp(-1)
+
+
+def make_hex_grid(
+    east: float,
+    west: float,
+    north: float,
+    south: float,
+    radius: float,
+    predicate=lambda x, y: True,
+):
+    """
+    Creates a dense hex grid of waypoints in the bounding box
+    (east, west, north, south) where inter-point radius is given.
+    Points ``(x,y)`` satisfying ``predicate(x,y) == True`` are kept;
+    all other points are removed from final result.
+    """
+    # Construct a dense grid.
+    X = "TODO"
+    Y = "TODO"
+
+    # Filter by predicate.
+    keep = predicate(X, Y)
+    if keep is not True:
+        "TODO"
+    waypoints = torch.stack([X, Y], dim=-1)
+
+    # Construct a transition matrix.
+    transition = "TODO"
+
+    return {
+        "waypoints": waypoints,
+        "transition": transition,
+    }
