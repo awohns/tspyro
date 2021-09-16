@@ -1,4 +1,5 @@
 import math
+from typing import Dict
 from typing import Optional
 
 import torch
@@ -184,32 +185,59 @@ class WaypointDiffusion2D(TorchDistribution):
         return destin_logp.logsumexp(-1)
 
 
+@torch.no_grad()
 def make_hex_grid(
-    east: float,
+    *,
     west: float,
-    north: float,
+    east: float,
     south: float,
+    north: float,
     radius: float,
     predicate=lambda x, y: True,
-):
+) -> Dict[str, torch.Tensor]:
     """
     Creates a dense hex grid of waypoints in the bounding box
     (east, west, north, south) where inter-point radius is given.
     Points ``(x,y)`` satisfying ``predicate(x,y) == True`` are kept;
     all other points are removed from final result.
+
+    :param float west:
+    :param float east:
+    :param float south:
+    :param float north: Bounding box coordinates.
+    :param float radius: The distance between neighboring points.
+    :param callable predicate: Optional feasibility function that inputs
+        vectors X and Y of waypoint positions and returns a boolean vector
+        describing whether each point is feasible.
+    :returns: A dictionary with two tensors: "waypoints" is a
+        ``(num_waypoints, 2)``-shaped tensor of waypoint positions, and
+        "transition" is a ``(num_waypoints, num_waypoints)``-shaped
+        stochastic transition matrix between waypoints.
+    :rtype: dict
     """
-    # Construct a dense grid.
-    X = "TODO"
-    Y = "TODO"
+    assert west < east
+    assert south < north
 
-    # Filter by predicate.
-    keep = predicate(X, Y)
+    # Construct a dense hexagonal grid.
+    dx = radius
+    dy = radius * 3.0 ** 0.5
+    parts = []
+    for x0, y0 in [(west, south), (west + dx / 2, south + dy / 2)]:
+        X = torch.arange(math.floor((east - west) / dx)) * dx + x0
+        Y = torch.arange(math.floor((north - south) / dy)) * dy + y0
+        X, Y = torch.broadcast_tensors(X, Y[:, None])
+        parts.append(torch.stack([X, Y], dim=-1))
+    waypoints = torch.cat(parts, dim=0)
+
+    # Filter to feasible points.
+    keep = predicate(*waypoints.unbind(-1))
     if keep is not True:
-        "TODO"
-    waypoints = torch.stack([X, Y], dim=-1)
+        waypoints = waypoints[keep]
 
-    # Construct a transition matrix.
-    transition = "TODO"
+    # Construct a transition matrix with a Gaussian kernel.
+    transition = torch.cdist(waypoints, waypoints)
+    transition.pow_(2).mul_(-0.5 / radius ** 2).exp_()
+    transition.div_(transition.sum(-1, True))
 
     return {
         "waypoints": waypoints,
