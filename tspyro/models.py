@@ -11,9 +11,11 @@ from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
 from pyro.infer.autoguide import init_to_median
 from pyro.nn import PyroModule
+from tspyro.diffusion import ApproximateMatrixExponential
+from tspyro.diffusion import WaypointDiffusion2D
 
 
-class NaiveModel(PyroModule):
+class BaseModel(PyroModule):
     def __init__(
         self, ts, *, Ne, prior, leaf_location=None, mutation_rate=1e-8, penalty=100.0
     ):
@@ -147,6 +149,12 @@ class NaiveModel(PyroModule):
                 locations[parent] = val
         return torch.tensor(locations[ts.num_samples :])  # noqa
 
+
+class NaiveModel(BaseModel):
+    def __init__(self, *args, **kwargs):
+        self.migration_likelihood = kwargs.pop("migration_likelihood", None)
+        super.__init__(*args, **kwargs)
+
     def forward(self):
         # First sample times from an improper uniform distribution which we denote
         # via .mask(False). Note only the internal nodes are sampled; leaves are
@@ -188,29 +196,79 @@ class NaiveModel(PyroModule):
                 obs=self.mutations,
             )
 
-            if self.leaf_location is not None:
-                gap = gap.clamp(min=1e-10)
-                # GEOGRAPHY.
-                # The following encodes that children migrate away from their parents
-                # following brownian motion with rate migration_scale.
-                location = torch.cat([self.leaf_location, internal_location], 0)
-                parent_location = location.index_select(0, self.parent)
-                child_location = location.index_select(0, self.child)
-                # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
-                # in case you want to draw multiple samples.
-                migration_radius = migration_scale[..., None] * gap ** 0.5
-
-                # Normalise distance
-                distance = (child_location - parent_location).square().sum(-1).sqrt()
-                pyro.sample(
-                    "migration",
-                    # Trying a heavy-tailed distribution
-                    dist.Exponential(1 / migration_radius),
-                    obs=distance,
-                )
-            else:
+            if self.migration_likelihood is None:
                 location = torch.ones(self.ts.num_nodes)
+            else:
+                location = torch.cat([self.leaf_location, internal_location], 0)
+                self.migration_likelihood(
+                    self.parent, self.child, migration_scale, time, location
+                )
         return time, gap, location, migration_scale
+
+
+def euclidean_migration(parent, child, migration_scale, time, location):
+    """
+    Example::
+
+        model = Model(
+            ...,
+            migration_likelihood=euclidean_migration
+        )
+    """
+    gap = time[parent] - time[child]
+    gap = gap.clamp(min=1e-10)
+    # The following encodes that children migrate away from their parents
+    # following brownian motion with rate migration_scale.
+    parent_location = location.index_select(0, parent)
+    child_location = location.index_select(0, child)
+    # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
+    # in case you want to draw multiple samples.
+    migration_radius = migration_scale[..., None] * gap ** 0.5
+
+    # Normalise distance
+    distance = (child_location - parent_location).square().sum(-1).sqrt()
+    pyro.sample(
+        "migration",
+        # Trying a heavy-tailed distribution
+        dist.Exponential(1 / migration_radius),
+        obs=distance,
+    )
+
+
+class WayPointMigration:
+    """
+    Example::
+
+        model = Model(
+            ...,
+            migration_likelihood=WayPointMigration(
+                transitions, waypoints, waypoint_radius
+            )
+        )
+    """
+
+    def __init__(self, transitions, waypoints, waypoint_radius):
+        self.waypoint_radius = waypoint_radius
+        self.waypoints = waypoints
+        # This cheaply precomputes some matrices.
+        self.matrix_exp = ApproximateMatrixExponential(self.transition)
+
+    def __call__(self, parent, child, migration_scale, time, location):
+        gap = time[parent] - time[child]
+        gap = gap.clamp(min=1e-10)
+        parent_location = location.index_select(0, parent)
+        child_location = location.index_select(0, child)
+        pyro.sample(
+            "migration",
+            WaypointDiffusion2D(
+                source=parent_location,
+                time=gap / migration_scale,  # FIXME is this right?
+                radius=self.waypoint_radius,
+                waypoints=self.waypoints,
+                matrix_exp=self.matrix_exp,
+            ),
+            obs=child_location,
+        )
 
 
 def guide(ts, leaf_location, priors, Ne=10000, mutation_rate=1e-8, steps=1001):
