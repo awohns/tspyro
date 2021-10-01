@@ -153,6 +153,7 @@ class BaseModel(PyroModule):
 class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
+        self.location_model = kwargs.pop("location_model", mean_field_location)
         super.__init__(*args, **kwargs)
 
     def forward(self):
@@ -170,12 +171,7 @@ class NaiveModel(BaseModel):
                 ),  # False turns off prior but uses it for initialisation
             )  # internal time is modelled in logspace
 
-            # GEOGRAPHY.
-            # Sample location from a flat prior, we'll add a pyro.factor statement later.
-            internal_location = pyro.sample(
-                "internal_location",
-                dist.Normal(torch.zeros(2), torch.ones(2)).to_event(1).mask(False),
-            )
+            internal_location = self.location_model()
 
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
@@ -204,6 +200,17 @@ class NaiveModel(BaseModel):
                     self.parent, self.child, migration_scale, time, location
                 )
         return time, gap, location, migration_scale
+
+
+def mean_field_location():
+    # Sample location from a flat prior, we'll add a pyro.factor statement later.
+    return pyro.sample(
+        "internal_location",
+        dist.Normal(torch.zeros(2), torch.ones(2)).to_event(1).mask(False),
+    )
+
+
+# TODO implement class ReparamLocation from ReparamModel.
 
 
 def euclidean_migration(parent, child, migration_scale, time, location):
