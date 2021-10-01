@@ -3,7 +3,7 @@ Functions to perform inference on a tree sequence
 """
 import tsdate
 
-from . import uniform_geography
+from . import models
 
 
 def infer_geotime(
@@ -11,4 +11,4 @@ def infer_geotime(
 ):
     if priors is None:
         priors = tsdate.build_prior_grid(ts, Ne=10000)
-    return uniform_geography.guide(ts, leaf_location, priors, Ne, mutation_rate, steps)
+    return models.guide(ts, leaf_location, priors, Ne, mutation_rate, steps)
