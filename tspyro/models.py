@@ -9,7 +9,6 @@ from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
-from pyro.infer.autoguide import init_to_median
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
@@ -31,9 +30,11 @@ class BaseModel(PyroModule):
 
         self.parent = torch.tensor(edges.parent, dtype=torch.long)
         self.child = torch.tensor(edges.child, dtype=torch.long)
-        self.span = torch.tensor(edges.right - edges.left, dtype=torch.float)
+        self.span = torch.tensor(
+            edges.right - edges.left, dtype=torch.get_default_dtype()
+        )
         self.mutations = torch.tensor(
-            self.get_mut_edges(), dtype=torch.float
+            self.get_mut_edges(), dtype=torch.get_default_dtype()
         )  # this is an int, but we optimise with float for pytorch
 
         self.penalty = float(penalty)
@@ -41,9 +42,9 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        timepoints = torch.as_tensor(prior.timepoints, dtype=torch.float)
+        timepoints = torch.as_tensor(prior.timepoints, dtype=torch.get_default_dtype())
         timepoints = timepoints.mul(2 * Ne).log1p()
-        grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.float)
+        grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.get_default_dtype())
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
         deltas = (timepoints - self.prior_loc[:, None]) ** 2
@@ -105,7 +106,7 @@ class BaseModel(PyroModule):
     def edge_span(self, edge):
         return edge.right - edge.left
 
-    def average_edges(self, parent_edges, locations):
+    def average_edges(self, parent_edges, locations, method="average"):
         parent = parent_edges[0]
         edges = parent_edges[1]
 
@@ -117,9 +118,12 @@ class BaseModel(PyroModule):
             child_spanfracs.append(self.edge_span(edge))
             child_lats.append(locations[edge.child][0])
             child_longs.append(locations[edge.child][1])
-        val = self.weighted_geographic_center(
-            child_lats, child_longs, np.ones_like(len(child_lats))
-        )
+        if method == "average":
+            val = np.average(np.array([child_lats, child_longs]).T, axis=0)
+        elif method == "geographic_mean":
+            val = self.weighted_geographic_center(
+                child_lats, child_longs, np.ones_like(len(child_lats))
+            )
         return parent, val
 
     def radians_center_weighted(self, x, y, z, weights):
@@ -147,14 +151,16 @@ class BaseModel(PyroModule):
             if parent_edges[0] not in fixed_nodes:
                 parent, val = self.average_edges(parent_edges, locations)
                 locations[parent] = val
-        return torch.tensor(locations[ts.num_samples :])  # noqa
+        return torch.tensor(
+            locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa
+        )
 
 
 class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
-        super.__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def forward(self):
         # First sample times from an improper uniform distribution which we denote
@@ -211,6 +217,65 @@ def mean_field_location():
 
 
 # TODO implement class ReparamLocation from ReparamModel.
+class ReparamLocation:
+    """
+    Example::
+
+        model = Model(
+            ...,
+            location_model=ReparamLocation()
+    """
+
+    def __init__(self, ts, leaf_location):
+        dtype = torch.get_default_dtype()
+        D = 2  # assume 2D for now
+        N = ts.num_nodes
+        L = len(leaf_location)
+
+        # These are coefficients in an affine reparametrization:
+        #   location = baseline_0 + baseline_1 @ delta  # i.e. constant + matmul
+        # where the delta matrix of shape (N,D) is our new latent variable.
+        baseline_0 = torch.zeros(N, D)  # intercept
+        baseline_0[:L] = leaf_location
+        baseline_1 = torch.zeros(N, N)  # slope
+        baseline_1[L:, L:] = torch.eye(N - L)  # each location depends on its delta
+        times = torch.tensor(
+            ts.tables.nodes.time, dtype=dtype
+        )  # assume times are fixed
+
+        for parent, edges in itertools.groupby(
+            ts.edges(), operator.attrgetter("parent")
+        ):
+            children = [e.child for e in edges]
+            assert children
+            children = torch.tensor(children)
+
+            # Compute a 1/gap weighted average of child locations.
+            gaps = times[parent] - times[children]
+            assert (gaps > 0).all()
+            weights = 1 / gaps  # Brownian weights
+            weights /= weights.sum()  # normalize
+
+            # Parent's location is weighted sum of child locations, plus delta.
+            baseline_0[parent] = (weights[:, None] * baseline_0[children]).sum(0)
+            baseline_1[parent] += (weights[:, None] * baseline_1[children]).sum(0)
+        # Restrict to internal nodes.
+        baseline_0 = baseline_0[L:].clone()
+        baseline_1 = baseline_1[L:, L:].clone()
+        self.baseline = baseline_0, baseline_1
+
+    def __call__(self):
+        # GEOGRAPHY.
+        # Locations will be parametrized as difference from a baseline, where the
+        # baseline location of a parent is a weighted sum of child locations.
+        # Sample locations from a flat prior, we'll add a pyro.factor statement later.
+        internal_delta = pyro.sample(
+            "internal_delta",
+            dist.Normal(torch.zeros(2), torch.ones(2)).to_event(1).mask(False),
+        )  # [self.num_internal, 2]
+        baseline_0, baseline_1 = self.baseline
+        internal_location = baseline_0 + baseline_1 @ internal_delta
+        return internal_location
 
 
 def euclidean_migration(parent, child, migration_scale, time, location):
@@ -258,7 +323,9 @@ class WayPointMigration:
         self.waypoint_radius = waypoint_radius
         self.waypoints = waypoints
         # This cheaply precomputes some matrices.
-        self.matrix_exp = ApproximateMatrixExponential(self.transition)
+        self.matrix_exp = ApproximateMatrixExponential(
+            transitions, max_time_step=1e6
+        )  # TODO: need to fix max time step
 
     def __call__(self, parent, child, migration_scale, time, location):
         gap = time[parent] - time[child]
@@ -269,7 +336,7 @@ class WayPointMigration:
             "migration",
             WaypointDiffusion2D(
                 source=parent_location,
-                time=gap / migration_scale,  # FIXME is this right?
+                time=gap * migration_scale,
                 radius=self.waypoint_radius,
                 waypoints=self.waypoints,
                 matrix_exp=self.matrix_exp,
@@ -278,31 +345,51 @@ class WayPointMigration:
         )
 
 
-def guide(ts, leaf_location, priors, Ne=10000, mutation_rate=1e-8, steps=1001):
+def fit_guide(
+    ts,
+    leaf_location,
+    priors,
+    Ne=10000,
+    mutation_rate=1e-8,
+    steps=1001,
+    Model=NaiveModel,
+    migration_likelihood=None,
+    location_model=mean_field_location,
+    log_every=100,
+):
 
     pyro.set_rng_seed(20210518)
     pyro.clear_param_store()
 
-    model = NaiveModel(
-        ts,
+    model = Model(
+        ts=ts,
         leaf_location=leaf_location,
         prior=priors,
         Ne=Ne,
         mutation_rate=mutation_rate,
+        migration_likelihood=migration_likelihood,
+        location_model=location_model,
     )
 
     def init_loc_fn(site):
+        # TIME
         if site["name"] == "internal_time":
             prior_init = np.einsum(
                 "t,nt->n", priors.timepoints, (priors.grid_data[:])
             ) / np.sum(priors.grid_data[:], axis=1)
-            internal_time = torch.as_tensor(prior_init, dtype=torch.float)  # / Ne
+            internal_time = torch.as_tensor(
+                prior_init, dtype=torch.get_default_dtype()
+            )  # / Ne
             return internal_time.clamp(min=0.1)
         # GEOGRAPHY.
         if site["name"] == "internal_location":
             initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
             return initial_guess_loc
-        return init_to_median(site)
+        if site["name"] == "internal_delta":
+            return torch.zeros(site["fn"].shape())
+        if site["name"] == "migration_scale":
+            return torch.tensor(0.01)
+        raise NotImplementedError("Missing init for {}".format(site["name"]))
 
     guide = AutoNormal(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
@@ -315,17 +402,21 @@ def guide(ts, leaf_location, priors, Ne=10000, mutation_rate=1e-8, steps=1001):
     for step in range(steps):
         loss = svi.step() / ts.num_nodes
         losses.append(loss)
-        if step % 100 == 0:
+        if step % log_every == 0:
             with torch.no_grad():
                 median = (
                     guide.median()
                 )  # assess convergence of migration scale parameter
-                migration_scale = float(median["migration_scale"])
-                migration_scales.append(migration_scale)
+                try:
+                    migration_scale = float(median["migration_scale"])
+                    migration_scales.append(migration_scale)
+                except KeyError:
+                    migration_scale = None
+                    print("Migration scale is fixed")
             print(
                 f"step {step} loss = {loss:0.5g}, "
-                f"Migration scale= {migration_scale:0.3g}"
+                f"Migration scale= {migration_scale}"
             )
     median = guide.median()
     pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
-    return pyro_time, location, migration_scale, guide
+    return pyro_time, location, migration_scale, guide, losses

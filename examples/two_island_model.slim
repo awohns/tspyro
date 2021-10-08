@@ -1,0 +1,56 @@
+// Keywords: continuous space, continuous spatial landscape, reprising boundaries
+
+initialize() {
+	initializeSLiMOptions(dimensionality="xy");
+	initializeTreeSeq(); 
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+	
+	// Set up an interaction for spatial competition
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=1);
+	i1.setInteractionFunction("n", 2.0, 0.04);
+
+	// spatial mate choice
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=3);
+	i2.setInteractionFunction("n", 2.0, 0.04);
+}
+1 late() {
+	sim.addSubpop("p1", 1000);
+	mapImage = Image("/Users/anthonywohns/Documents/Broad Institute/tspyro_evaluation/model_close_gray.png");
+//	p1.defineSpatialMap("world", "xy", 1.0 - mapImage.floatK, valueRange=c(0.0, 1.0), colors=c("#ffffff", "#000000"));
+	p1.setSpatialBounds(c(0.0, 0.0, 3.9990, 2.2490));
+	p1.defineSpatialMap("world1", "xy", 1.0 - mapImage.floatK,
+ 		valueRange=c(0.0, 1.0), colors=c("#0000CC", "#55FF22"));
+ 	p1.individuals.setSpatialPosition(p1.pointUniform(1000));
+//	p1.individuals.setSpatialPosition(c(rep(c(1.5, 1.2), 250), rep(c(2.5, 1.2), 250)));
+}
+1: late() {
+	i1.evaluate();
+	inds = sim.subpopulations.individuals;
+	competition = i1.totalOfNeighborStrengths(inds);
+	inds.fitnessScaling = 1.1 - competition / size(inds);
+	i2.evaluate();
+}
+1: mateChoice() {
+	// spatial mate choice
+	return i2.strength(individual);
+}
+late() {
+   sim.treeSeqRememberIndividuals(p1.individuals, permanent=F);
+}
+modifyChild() {
+	do pos = parent1.spatialPosition + rnorm(2, 0, 0.02);
+	while (!p1.pointInBounds(pos));
+	// prevent dispersal into water
+	if ((p1.spatialMapValue("world1", pos) == 0.0))
+ 		return F;
+ 	child.setSpatialPosition(pos);
+		return T;
+	return T;
+}
+2000 late() { 
+sim.treeSeqOutput("~/Desktop/close_islands.trees");
+sim.outputFixedMutations(); }
