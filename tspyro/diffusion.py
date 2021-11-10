@@ -228,8 +228,8 @@ def make_hex_grid(
     dy = radius * 3.0 ** 0.5
     parts = []
     for x0, y0 in [(west, south), (west + dx / 2, south + dy / 2)]:
-        X = torch.arange(math.floor((east - west) / dx)) * dx + x0
-        Y = torch.arange(math.floor((north - south) / dy)) * dy + y0
+        X = torch.arange(1 + math.floor((east - west) / dx)) * dx + x0
+        Y = torch.arange(1 + math.floor((north - south) / dy)) * dy + y0
         X, Y = torch.broadcast_tensors(X, Y[:, None])
         parts.append(torch.stack([X, Y], dim=-1))
     waypoints = torch.cat(parts, dim=0)
