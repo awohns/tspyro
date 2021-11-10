@@ -176,13 +176,18 @@ class WaypointDiffusion2D(TorchDistribution):
         )
 
     def log_prob(self, destin: torch.Tensor) -> torch.Tensor:
+        """
+        This is really normalized over source, destin pair, but is not normalized
+        over destin alone
+        """
         finfo = torch.finfo(destin.dtype)
         source_logp = self._waypoint_logp(self.source)
-        source_logp = source_logp - source_logp.logsumexp(-1, True)
+        result = source_logp.logsumexp(-1, True)
+        source_logp = source_logp - result
         source_prob = source_logp.exp()
         destin_prob = self.matrix_exp(self.time, source_prob).clamp(min=finfo.tiny)
         destin_logp = destin_prob.log() + self._waypoint_logp(destin)
-        return destin_logp.logsumexp(-1)
+        return result[..., 0] + destin_logp.logsumexp(-1)
 
 
 @torch.no_grad()
