@@ -43,7 +43,7 @@ class BaseModel(PyroModule):
 
         # conditional coalescent prior
         timepoints = torch.as_tensor(prior.timepoints, dtype=torch.get_default_dtype())
-        timepoints = timepoints.mul(2 * Ne).log1p()
+        timepoints = timepoints.log1p()
         grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.get_default_dtype())
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
@@ -171,7 +171,6 @@ class NaiveModel(BaseModel):
         with pyro.plate("internal_nodes", self.num_internal):
             internal_time = pyro.sample(
                 "internal_time",
-                # dist.Exponential(1).mask(False),
                 dist.LogNormal(self.prior_loc, self.prior_scale).mask(
                     True
                 ),  # False turns off prior but uses it for initialisation
