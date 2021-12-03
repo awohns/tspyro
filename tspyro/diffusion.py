@@ -233,6 +233,7 @@ def make_hex_grid(
         X, Y = torch.broadcast_tensors(X, Y[:, None])
         parts.append(torch.stack([X, Y], dim=-1))
     waypoints = torch.cat(parts, dim=0)
+    waypoints = waypoints.reshape(-1, 2)
 
     # Filter to feasible points.
     keep = predicate(*waypoints.unbind(-1))
