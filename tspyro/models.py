@@ -181,8 +181,8 @@ class NaiveModel(BaseModel):
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
-        time = torch.zeros((self.num_nodes,))
-        time[self.is_internal] = internal_time
+        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
+        time[..., self.is_internal] = internal_time
         # Should we be Bayesian about migration scale, or should it be fixed?
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
 
@@ -204,7 +204,16 @@ class NaiveModel(BaseModel):
             if self.migration_likelihood is None:
                 location = torch.ones(self.ts.num_nodes)
             else:
-                location = torch.cat([self.leaf_location, internal_location], 0)
+                # We need to expand leaf_location because internal_location may
+                # be vectorized over monte carlo samples.
+                batch_shape = internal_location.shape[:-2]
+                location = torch.cat(
+                    [
+                        self.leaf_location.expand(batch_shape + (-1, -1)),
+                        internal_location,
+                    ],
+                    -2,
+                )
                 self.migration_likelihood(
                     self.parent, self.child, migration_scale, time, location
                 )
@@ -297,8 +306,8 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # time latent variable
     # The following encodes that children migrate away from their parents
     # following brownian motion with rate migration_scale.
-    parent_location = location.index_select(0, parent)
-    child_location = location.index_select(0, child)
+    parent_location = location.index_select(-2, parent)
+    child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
     migration_radius = migration_scale[..., None] * gap ** 0.5

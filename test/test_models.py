@@ -1,8 +1,10 @@
 import os
 
+import pyro
 import pyslim
 import torch
 import tsdate
+from pyro import poutine
 from tspyro.models import euclidean_migration
 from tspyro.models import fit_guide
 from tspyro.models import mean_field_location
@@ -13,7 +15,7 @@ EXAMPLES = os.path.join(REPO, "examples")
 
 
 def test_smoke():
-    ts = pyslim.load(os.path.join(EXAMPLES, "two_islands.trees")).simplify()
+    ts = pyslim.load(os.path.join(EXAMPLES, "spatial_sim.trees")).simplify()
     recap_ts = ts.recapitate(recombination_rate=1e-8, Ne=50).simplify()
 
     lat_long = []
@@ -33,12 +35,20 @@ def test_smoke():
         progress=True,
     )
 
-    fit_guide(
+    pyro_time, location, migration_scale, guide, losses = fit_guide(
         recap_ts,
         leaf_location,
         priors,
         migration_likelihood=euclidean_migration,
         location_model=mean_field_location,
-        steps=10,
+        steps=3,
         Model=NaiveModel,
     )
+
+    num_samples = 4
+    with pyro.plate("particles", num_samples, dim=-2):
+        guide_trace = poutine.trace(guide).get_trace()
+        model_trace = poutine.trace(
+            poutine.replay(guide.model, guide_trace)
+        ).get_trace()
+        print(list(model_trace.nodes))
