@@ -1,9 +1,11 @@
-tskit
+torch
 pyro-ppl 
+tskit==0.3.7
+pyslim
+tsdate
 numpy
 tqdm
 codecov
 pytest-cov
 pre-commit
 flake8
-tsdate
