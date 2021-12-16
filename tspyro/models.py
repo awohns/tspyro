@@ -188,7 +188,7 @@ class NaiveModel(BaseModel):
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(-5, 1))
 
         # Next add a factor for time gaps between parents and children.
-        gap = time[..., self.parent] - time[..., self.child]
+        gap = (time[..., self.parent] - time[..., self.child]).clamp(min=1)
         with pyro.plate("edges", gap.shape[-1]):
 
             rate = (gap * self.span * self.mutation_rate).clamp(min=1e-8)
@@ -296,22 +296,27 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             migration_likelihood=euclidean_migration
         )
     """
-    gap = time[..., parent] - time[..., child]
-    gap = gap.clamp(min=1e-10)
+    gap = (time[..., parent] - time[..., child]).clamp(min=1)
     # The following encodes that children migrate away from their parents
-    # following brownian motion with rate migration_scale.
+    # following approximately Brownian motion with rate migration_scale.
     parent_location = location.index_select(-2, parent)
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
     migration_radius = migration_scale[..., None] * gap ** 0.5
 
-    # Normalise distance
-    distance = (child_location - parent_location).square().sum(-1).sqrt()
+    # Assume migration folows a bivariate Laplace distribution, so that
+    # distance follows a Gamma(2,-) distribution.  While a more theoretically
+    # sound model might replace the Brownian motion's Wiener process with a
+    # heavier tailed Levy stable process, the Stable distribution's tail is so
+    # heavy that inference becomes intractable.  To give our unimodal
+    # variational posterior a chance of finding the right mode, we use a
+    # log-concave likelihood with tails heavier than Normal but lighter than
+    # Stable.  An alternative might be to anneal tail weight.
+    distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
     pyro.sample(
         "migration",
-        # Trying a heavy-tailed distribution
-        dist.Exponential(1 / migration_radius),
+        dist.Gamma(2, 1 / migration_radius),
         obs=distance,
     )
 
@@ -337,8 +342,7 @@ class WayPointMigration:
         )  # TODO: need to fix max time step
 
     def __call__(self, parent, child, migration_scale, time, location):
-        gap = time[parent] - time[child]
-        gap = gap.clamp(min=1e-10)
+        gap = (time[parent] - time[child]).clamp(min=1)
         parent_location = location.index_select(0, parent)
         child_location = location.index_select(0, child)
         pyro.sample(
