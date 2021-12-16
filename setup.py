@@ -24,6 +24,9 @@ setup(
         "pytest",
         "pandas",
     ],
+    extras_require={
+        "test": ["pyslim"],
+    },
     project_urls={
         "Source": "https://github.com/awohns/tspyro",
         "Bug Reports": "https://github.com/awohns/tspyro/issues",
