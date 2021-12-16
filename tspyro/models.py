@@ -43,7 +43,7 @@ class BaseModel(PyroModule):
 
         # conditional coalescent prior
         timepoints = torch.as_tensor(prior.timepoints, dtype=torch.get_default_dtype())
-        timepoints = timepoints.mul(2 * Ne).log1p()
+        timepoints = timepoints.log1p()
         grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.get_default_dtype())
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
@@ -171,7 +171,6 @@ class NaiveModel(BaseModel):
         with pyro.plate("internal_nodes", self.num_internal):
             internal_time = pyro.sample(
                 "internal_time",
-                # dist.Exponential(1).mask(False),
                 dist.LogNormal(self.prior_loc, self.prior_scale).mask(
                     True
                 ),  # False turns off prior but uses it for initialisation
@@ -185,13 +184,17 @@ class NaiveModel(BaseModel):
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
         time[..., self.is_internal] = internal_time
         # Should we be Bayesian about migration scale, or should it be fixed?
-        migration_scale = pyro.sample("migration_scale", dist.LogNormal(-5, 1))
+        migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
 
         # Next add a factor for time gaps between parents and children.
-        gap = (time[..., self.parent] - time[..., self.child]).clamp(min=1)
-        with pyro.plate("edges", gap.shape[-1]):
+        gap = time[self.parent] - time[self.child]
+        with pyro.plate("edges", len(gap)):
+            # Penalize gaps that are less than 1.
+            clamped_gap = gap.clamp(min=1)
+            # TODO should we multiply this by e.g. 0.1
+            pyro.factor("gap_constraint", gap - clamped_gap)
 
-            rate = (gap * self.span * self.mutation_rate).clamp(min=1e-8)
+            rate = (clamped_gap * self.span * self.mutation_rate).clamp(min=1e-8)
             pyro.sample(
                 "mutations",
                 dist.Poisson(rate),
@@ -296,7 +299,11 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             migration_likelihood=euclidean_migration
         )
     """
-    gap = (time[..., parent] - time[..., child]).clamp(min=1)
+    gap = time[parent] - time[child]  # in units of generations
+    gap = gap.clamp(
+        min=1
+    )  # avoid incorrect ordering of parents/children due to unconstrained
+    # time latent variable
     # The following encodes that children migrate away from their parents
     # following approximately Brownian motion with rate migration_scale.
     parent_location = location.index_select(-2, parent)
@@ -364,10 +371,12 @@ def fit_guide(
     priors,
     Ne=10000,
     mutation_rate=1e-8,
+    migration_scale_init=1,
     steps=1001,
     Model=NaiveModel,
     migration_likelihood=None,
     location_model=mean_field_location,
+    learning_rate=0.005,
     log_every=100,
 ):
 
@@ -401,13 +410,15 @@ def fit_guide(
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
         if site["name"] == "migration_scale":
-            return torch.tensor(0.01)
+            return torch.tensor(float(migration_scale_init))
         raise NotImplementedError("Missing init for {}".format(site["name"]))
 
     guide = AutoNormal(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
     )  # Mean field (fully Bayesian)
-    optim = pyro.optim.ClippedAdam({"lr": 0.005, "lrd": 0.1 ** (1 / max(1, steps))})
+    optim = pyro.optim.ClippedAdam(
+        {"lr": learning_rate, "lrd": 0.1 ** (1 / max(1, steps))}
+    )
     svi = SVI(model, guide, optim, Trace_ELBO())
     guide()  # initialises the guide
     losses = []
