@@ -263,7 +263,7 @@ class ReparamLocation:
             children = torch.tensor(children)
 
             # Compute a 1/gap weighted average of child locations.
-            gaps = times[parent] - times[children]
+            gaps = (times[parent] - times[children]).clamp(min=1)
             assert (gaps > 0).all()
             weights = 1 / gaps  # Brownian weights
             weights /= weights.sum()  # normalize
