@@ -169,11 +169,13 @@ class WaypointDiffusion2D(TorchDistribution):
     def _waypoint_logp(self, position: torch.Tensor) -> torch.Tensor:
         assert position.size(-1) == 2
         r = torch.cdist(position, self.waypoints)
-        return (
+        result = (
             -math.log(2 * math.pi)
             - self.radius.log()
             - 0.5 * (r / self.radius).square()
         )
+        assert isinstance(result, torch.Tensor)
+        return result
 
     def log_prob(self, destin: torch.Tensor) -> torch.Tensor:
         """
