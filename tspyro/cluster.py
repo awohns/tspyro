@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import tqdm
 
@@ -63,6 +64,80 @@ def make_fake_data(num_samples, num_variants):
     check_sparse_genotypes(data)
 
     return data
+
+
+def naive_encoder(ts):
+    """
+    Make an encoding of the sparse genotype data naively: haplotype by haplotype.
+    Note this is very slow for large tree sequences.
+
+    :returns: A Dict representing sparse genotypes.
+    :rtype: dict
+    """
+    offsets = []
+    index = []
+    values = []
+    for haplo in tqdm(ts.haplotypes(), total=ts.num_samples):
+        begin = len(index)
+        for i, g in enumerate(haplo):
+            assert g in "-01"
+            if g != "-":
+                index.append(i)
+                values.append(bool(int(g)))
+        end = len(index)
+        offsets.append([begin, end])
+    return {
+        "offsets": torch.tensor(offsets, dtype=torch.long),
+        "index": torch.tensor(index, dtype=torch.long),
+        "values": torch.tensor(values, dtype=torch.bool),
+    }
+
+
+def variant_encoder(ts):
+    """
+    Encodes sparse genotype data variant by variant. This is faster
+    than the naive encoding but requires inverting to be compatible with
+    `make_clustering_gibbs()`.
+
+    :returns: A Dict representing sparse genotypes in compressed sparse
+    column format.
+    :rtype: dict
+    """
+    offsets = []
+    index = []
+    values = []
+    for var in tqdm(ts.variants(), total=ts.num_sites):
+        geno = var.genotypes
+        begin = len(index)
+
+        index.extend(np.where([geno != -1])[1])
+
+        non_missing = geno != -1
+        values.extend(geno[non_missing] != 0)
+        end = len(index)
+        offsets.append([begin, end])
+    return {
+        "offsets": torch.tensor(offsets, dtype=torch.long),
+        "index": torch.tensor(index, dtype=torch.long),
+        "values": torch.tensor(values, dtype=torch.bool),
+    }
+
+
+def dense_encoder_genos(genos):
+    """
+    Encodes a genotype matrix in the sparse genotype encoding format.
+
+    :returns: A Dict representing sparse genotypes.
+    :rtype: dict
+    """
+    n, p = genos.shape
+    print("n*p is {}".format(n * p))
+    return {
+        "offsets": torch.arange(n, dtype=torch.long)[:, None] * p
+        + torch.tensor([0, p]),
+        "index": torch.arange(p).expand(n, p).reshape(-1),
+        "values": torch.as_tensor(genos).bool().reshape(-1),
+    }
 
 
 def make_clustering_gibbs(
@@ -131,7 +206,7 @@ def make_clustering_gibbs(
     assert (counts.sum() / expected).sub(1).abs() < 1e-6
 
     clusters = (counts[..., 1] / counts.sum(-1)).round_().bool()
-    return clusters
+    return assignment, clusters
 
 
 def make_reproduction_tensor(
