@@ -3,6 +3,14 @@ import tqdm
 
 
 def check_sparse_genotypes(data: dict):
+    """
+    Check that a sparse genotype datastructure has correct fields, shapes, and
+    dtypes.
+
+    :param dict data: A dict representing sparse genotypes.
+    :returns: A tuple ``(offsets, index, values)``
+    :rtype: tuple
+    """
     assert isinstance(data, dict)
     assert set(data) == {"offsets", "index", "values"}
     offsets = data["offsets"]
@@ -21,7 +29,7 @@ def check_sparse_genotypes(data: dict):
     assert index.dim() == 1
     assert values.dim() == 1
 
-    assert index.shape == offsets.shape[:1]
+    assert index.shape == (int(offsets[-1, -1]),)
     assert index.shape == values.shape
 
     return offsets, index, values
@@ -62,14 +70,17 @@ def make_clustering_gibbs(
         pending[sign] += 1
         beg, end = offsets[n]
         index_n = index[beg:end]
-        value_n = values[beg:end].long()
+        value_n = values[beg:end]
 
         if sign > 0:
             # Add the datum to a random cluster.
             assert assignment[n] == -1
             posterior = counts[index_n].float().add_(0.5)  # add Jeffreys prior
-            probs = (posterior[..., value_n] / posterior.sum(-1)).log().sum(-1)
-            k = int(probs.multinomial(1))
+            posterior /= posterior.sum(-1, True)
+            tails, heads = posterior.unbind(-1)
+            logits = torch.where(value_n[:, None], heads, tails).sum(0)
+            logits -= logits.max()
+            k = int(logits.exp().multinomial(1))
             assignment[n] = k
         else:
             # Remove the datum from the current cluster.
@@ -77,9 +88,9 @@ def make_clustering_gibbs(
             k = int(assignment[n])
             assignment[n] = -1
 
-        counts[index_n, k, value_n] += sign
+        counts[index_n, k, value_n.long()] += sign
     assert all(assignment >= 0)
 
-    posterior = counts.float().add_(0.5)
+    posterior = counts.float().add_(0.5)  # add Jeffreys prior
     clusters = (posterior[..., 1] / posterior.sum(-1)).round().bool()
     return clusters
