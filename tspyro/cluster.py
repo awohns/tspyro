@@ -55,17 +55,22 @@ def make_clustering_gibbs(
     N = len(offsets)
     P = 1 + int(index.max())
     K = num_clusters
+    MISSING = -1
+    prior = 0.5  # Jeffreys prior
 
-    counts = torch.full((P, K, 2), 0.5, dtype=torch.long)
-    assignment = torch.full((N,), -1, dtype=torch.long)
+    # The single site Gibbs algorithm treats assignment as the latent variable,
+    # and caches sufficient statistics in the counts tensor.
+    assignment = torch.full((N,), MISSING, dtype=torch.long)
+    counts = torch.full((P, K, 2), prior, dtype=torch.float)
+    assert N < 2 ** 23, "counts has too little precision"
 
     # Use a shuffled linearly annealed schedule.
-    schedule = (([+1, -1] * num_epochs)[:-1]) * N
+    schedule = (([+1, -1] * num_epochs)[:-1]) * N  # +1 means add, -1 means remove.
     shuffle = torch.randperm(N)
     assert sum(schedule) == N
     pending = {+1: 0, -1: 0}
     for sign in tqdm.tqdm(schedule):
-        # Select the next pending datum.
+        # Select the next pending datum to either add or remove.
         n = shuffle[pending[sign] % N]
         pending[sign] += 1
         beg, end = offsets[n]
@@ -74,23 +79,26 @@ def make_clustering_gibbs(
 
         if sign > 0:
             # Add the datum to a random cluster.
-            assert assignment[n] == -1
-            posterior = counts[index_n].float().add_(0.5)  # add Jeffreys prior
-            posterior /= posterior.sum(-1, True)
+            assert assignment[n] == MISSING
+            posterior = counts[index_n]
             tails, heads = posterior.unbind(-1)
-            logits = torch.where(value_n[:, None], heads, tails).sum(0)
+            logits = torch.where(value_n[:, None], heads, tails)
+            logits = logits.div_(posterior.sum(-1)).log_().sum(0)
             logits -= logits.max()
-            k = int(logits.exp().multinomial(1))
+            k = int(logits.exp_().multinomial(1))
             assignment[n] = k
         else:
             # Remove the datum from the current cluster.
-            assert assignment[n] != -1
+            assert assignment[n] != MISSING
             k = int(assignment[n])
-            assignment[n] = -1
+            assignment[n] = MISSING
 
         counts[index_n, k, value_n.long()] += sign
     assert all(assignment >= 0)
+    assert pending[+1] % N == 0
+    assert pending[-1] % N == 0
+    expected = len(values) + counts.shape.numel() * prior
+    assert (counts.sum() / expected).sub(1).abs() < 1e-6
 
-    posterior = counts.float().add_(0.5)  # add Jeffreys prior
-    clusters = (posterior[..., 1] / posterior.sum(-1)).round().bool()
+    clusters = (counts[..., 1] / counts.sum(-1)).round_().bool()
     return clusters
