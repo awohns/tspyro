@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import numpy as np
 import torch
 import tqdm
@@ -33,6 +35,9 @@ def check_sparse_genotypes(data: dict):
     assert index.shape == (int(offsets[-1, -1]),)
     assert index.shape == values.shape
 
+    assert offsets[0, 0] == 0
+    assert (offsets[1:, 0] == offsets[:-1, 1]).all()
+
     return offsets, index, values
 
 
@@ -64,6 +69,43 @@ def make_fake_data(num_samples, num_variants):
     check_sparse_genotypes(data)
 
     return data
+
+
+def transpose_sparse(data: dict, num_cols=0) -> dict:
+    """
+    Convert from row-oriented to column-oriented.
+    This function is its own inverse.
+
+    :param dict data: A dict representing sparse genotypes.
+    :param int num_cols: Optional number of columns.
+    :returns: A dict representing sparse genotypes.
+    :rtype: dict
+    """
+    old_offsets, old_index, old_values = check_sparse_genotypes(data)
+    num_rows = len(old_offsets)
+    num_cols = max(num_cols, 1 + int(old_index.max()))
+
+    # Initialize positions and create offsets.
+    position = torch.zeros(1 + num_cols, dtype=torch.long)
+    for r in range(num_rows):
+        beg, end = old_offsets[r].tolist()
+        index = old_index[beg:end]
+        position[1 + index] += 1
+    position.cumsum_(0)
+    new_offsets = torch.stack([position[:-1], position[1:]], dim=-1)
+
+    # Populate index and values.
+    new_index = torch.zeros_like(old_index)
+    new_values = torch.zeros_like(old_values)
+    for r in range(num_rows):
+        beg, end = old_offsets[r].tolist()
+        index = old_index[beg:end]
+        values = old_values[beg:end]
+        new_index[position[index]] = r
+        new_values[position[index]] = values
+        position[index] += 1
+
+    return dict(offsets=new_offsets, index=new_index, values=new_values)
 
 
 def naive_encoder(ts):
@@ -145,7 +187,7 @@ def make_clustering_gibbs(
     num_clusters: int,
     *,
     num_epochs: int = 10,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Clusters sparse genotypes using subsample-annealed Gibbs sampling.
 

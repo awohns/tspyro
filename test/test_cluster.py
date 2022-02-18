@@ -5,6 +5,7 @@ import torch
 from tspyro.cluster import make_clustering_gibbs
 from tspyro.cluster import make_fake_data
 from tspyro.cluster import make_reproduction_tensor
+from tspyro.cluster import transpose_sparse
 
 
 @pytest.mark.parametrize("num_epochs", [1, 10])
@@ -16,7 +17,10 @@ def test_clustering(num_variants, num_samples, num_clusters, num_epochs):
     data = make_fake_data(num_samples, num_variants)
 
     print(f"Creating {num_clusters} clusters via {num_epochs} epochs")
-    clusters = make_clustering_gibbs(data, num_clusters, num_epochs=num_epochs)
+    assignment, clusters = make_clustering_gibbs(
+        data, num_clusters, num_epochs=num_epochs
+    )
+    assert assignment.shape == (num_samples,)
     assert clusters.shape == (num_variants, num_clusters)
 
     print("Creating a reproduction tensor")
@@ -31,6 +35,17 @@ def test_clustering(num_variants, num_samples, num_clusters, num_epochs):
     assert reproduce.shape == (num_clusters, num_clusters, num_clusters)
     assert torch.allclose(reproduce, reproduce.transpose(0, 1))
     assert torch.allclose(reproduce.sum(-1), torch.ones(num_clusters, num_clusters))
+
+
+@pytest.mark.parametrize("num_samples", [5, 10, 100])
+@pytest.mark.parametrize("num_variants", [4, 8, 100])
+def test_transpose(num_variants, num_samples):
+    data1 = make_fake_data(num_samples, num_variants)
+    data2 = transpose_sparse(data1)
+    data3 = transpose_sparse(data2)
+    for k, v1 in data1.items():
+        v3 = data3[k]
+        assert (v1 == v3).all()
 
 
 if __name__ == "__main__":
