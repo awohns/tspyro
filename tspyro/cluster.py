@@ -265,8 +265,8 @@ def make_reproduction_tensor(
         array of clusters.
     :param torch.Tensor crossover_rate: A ``num_variants-1``-long vector of
         probabilties of crossover between successive variants.
-    :param torch.Tensor mutation_rate: A ``num_variants``-long vector of
-        mutation probabilites of mutation at each variant site.
+    :param torch.Tensor mutation_rate: A scalar or ``num_variants``-long vector
+        of mutation probabilites of mutation at each variant site.
     :returns: A reproduction tensor of shape ``(C, C, C)`` where ``C`` is the
         number of clusters. This tensor is symmetric in the first two axes and
         a normalized probability mass function over the third axis.
@@ -274,6 +274,7 @@ def make_reproduction_tensor(
     """
     P, C = clusters.shape
     assert crossover_rate.shape == (P - 1,)
+    mutation_rate = torch.as_tensor(mutation_rate, dtype=torch.float).expand(P)
     assert mutation_rate.shape == (P,)
 
     # Construct a transition matrix.
