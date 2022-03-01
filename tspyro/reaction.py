@@ -14,6 +14,14 @@ from pyro.optim import ClippedAdam
 
 
 class SingleChromosomeReaction:
+    """
+    :param torch.Tensor reproduction_op: A `(C,C,C)` shaped array from
+        :func:`tspyro.cluster.make_reproduction_tensor`
+    :param torch.Tensor leaf_times: A `N`-length array of sample times in units of
+        generations.
+    :param torch.Tensor leaf_clusters: A `N`-length array of cluster ids, each
+        of which takes a value in `[0,C-1]`.
+    """
 
     latent_variables = ["diffusion"]
 
@@ -36,10 +44,12 @@ class SingleChromosomeReaction:
         assert leaf_clusters.dtype == torch.long
         C = len(reproduction_op)
         N = len(leaf_times)
+        T = num_time_steps
         assert reproduction_op.shape == (C, C, C)
         assert leaf_times.shape == (N,)
         assert leaf_clusters.shape == (N,)
-        assert leaf_times.max().item() < num_time_steps
+        assert 0 <= leaf_times.max().item() < T
+        assert 0 <= leaf_clusters.max().item() < C
         self.reproduction_op = reproduction_op
         self.leaf_times = leaf_times
         self.leaf_clusters = leaf_clusters
@@ -63,8 +73,9 @@ class SingleChromosomeReaction:
         # Sample density from an improper prior.
         # Consider instead using an informative prior.
         # Consider using HaarReparam(dim=-2) or DiscreteCosineReparam(dim=-2).
-        with time_plate, cluster_plate, pyro.mask(mask=False):
+        with time_plate, cluster_plate, poutine.mask(mask=False):
             density = pyro.sample("density", dist.Exponential(1))
+            density = density.clamp(min=1e-6)
 
         # Reaction factor.
         # Note technically there are dependencies across cluster_plate.
@@ -105,7 +116,7 @@ class SingleChromosomeReaction:
         *,
         reparam: Optional[dict] = None,
         num_steps: int = 10001,
-        learning_rate: float = 1e-3,
+        learning_rate: float = 1e-2,
         learning_rate_decay: float = 1e-1,
         log_every: int = 100,
     ) -> dict:
