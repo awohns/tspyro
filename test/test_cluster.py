@@ -25,7 +25,7 @@ def test_clustering(num_variants, num_samples, num_clusters, num_epochs):
 
     print("Creating a reproduction tensor")
     crossover_rate = torch.rand(num_variants - 1) * 0.01
-    mutation_rate = torch.rand(num_variants) * 0.001
+    mutation_rate = 0.001
     reproduce = make_reproduction_tensor(
         clusters,
         crossover_rate=crossover_rate,

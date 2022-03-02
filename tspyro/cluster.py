@@ -1,3 +1,4 @@
+import math
 from typing import Tuple
 
 import numpy as np
@@ -255,7 +256,7 @@ def make_reproduction_tensor(
     clusters: torch.Tensor,
     *,
     crossover_rate: torch.Tensor,
-    mutation_rate: torch.Tensor,
+    mutation_rate: float,
 ) -> torch.Tensor:
     """
     Computes pairwise conditional probabilities of sexual reproduction
@@ -268,8 +269,8 @@ def make_reproduction_tensor(
         array of clusters.
     :param torch.Tensor crossover_rate: A ``num_variants-1``-long vector of
         probabilties of crossover between successive variants.
-    :param torch.Tensor mutation_rate: A scalar or ``num_variants``-long vector
-        of mutation probabilites of mutation at each variant site.
+    :param float mutation_rate: A scalar representing probability of mutation,
+        i.e. transitioning between wildtype and mutant each generation.
     :returns: A reproduction tensor of shape ``(C, C, C)`` where ``C`` is the
         number of clusters. This tensor is symmetric in the first two axes and
         a normalized probability mass function over the third axis.
@@ -277,8 +278,10 @@ def make_reproduction_tensor(
     """
     P, C = clusters.shape
     assert crossover_rate.shape == (P - 1,)
-    mutation_rate = torch.as_tensor(mutation_rate, dtype=torch.float).expand(P)
-    assert mutation_rate.shape == (P,)
+    mutation_rate = float(mutation_rate)
+    assert mutation_rate > 0
+    if clusters.dtype != torch.bool:
+        clusters = clusters.round().bool()
 
     # Construct a transition matrix.
     p = crossover_rate.neg().exp().mul(0.5).add(0.5)
@@ -289,12 +292,8 @@ def make_reproduction_tensor(
     transition[:, 1, 1] = p
 
     # Construct an mutation matrix.
-    p = mutation_rate.neg().exp().mul(0.5).add(0.5)
-    mutate = torch.zeros(P, 2, 2)
-    mutate[:, 0, 0] = p
-    mutate[:, 0, 1] = 1 - p
-    mutate[:, 1, 0] = 1 - p
-    mutate[:, 1, 1] = p
+    p = math.exp(-2 * mutation_rate) / 2 + 0.5
+    mutate = torch.tensor([[p, 1 - p], [1 - p, p]])
 
     # Apply pair HMM along each genotype.
     result = torch.zeros(C, C, C)
@@ -302,8 +301,8 @@ def make_reproduction_tensor(
     for p in tqdm.tqdm(range(P)):
         # Update with observation + mutation noise.
         c = clusters[p].long()
-        state[..., 0] *= mutate[p][c[:, None, None], c]
-        state[..., 1] *= mutate[p][c[None, :, None], c]
+        state[..., 0] *= mutate[c[:, None, None], c]
+        state[..., 1] *= mutate[c[None, :, None], c]
 
         # Transition via crossover.
         if p < P - 1:
