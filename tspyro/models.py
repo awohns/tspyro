@@ -328,6 +328,54 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     )
 
 
+def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
+    lat, long = latlong.unbind(-1)
+    x = lat.cos() * long.cos()
+    y = lat.cos() * long.sin()
+    z = lat.sin()
+    return torch.cat([x, y, z], dim=-1)
+
+
+def spherical_migration(parent, child, migration_scale, time, location):
+    """
+    Example::
+
+        model = Model(
+            ...,
+            migration_likelihood=spherical_migration
+        )
+    """
+    gap = time[parent] - time[child]  # in units of generations
+    gap = gap.clamp(
+        min=1
+    )  # avoid incorrect ordering of parents/children due to unconstrained
+    # time latent variable
+    # The following encodes that children migrate away from their parents
+    # following approximately Brownian motion with rate migration_scale.
+    parent_location = location.index_select(-2, parent)
+    child_location = location.index_select(-2, child)
+    # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
+    # in case you want to draw multiple samples.
+    migration_radius = migration_scale[..., None] * gap ** 0.5
+
+    # Assume migration folows a bivariate Laplace distribution, so that
+    # distance follows a Gamma(2,-) distribution.  While a more theoretically
+    # sound model might replace the Brownian motion's Wiener process with a
+    # heavier tailed Levy stable process, the Stable distribution's tail is so
+    # heavy that inference becomes intractable.  To give our unimodal
+    # variational posterior a chance of finding the right mode, we use a
+    # log-concave likelihood with tails heavier than Normal but lighter than
+    # Stable.  An alternative might be to anneal tail weight.
+    child_xyz = latlong_to_xyz(child_location)
+    parent_xyz = latlong_to_xyz(parent_location)
+    distance = torch.linalg.norm(child_xyz - parent_xyz, dim=-1, ord=2)
+    pyro.sample(
+        "migration",
+        dist.Gamma(2, 1 / migration_radius),
+        obs=distance,
+    )
+
+
 class WayPointMigration:
     """
     Example::

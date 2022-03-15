@@ -259,8 +259,8 @@ def make_reproduction_tensor(
     mutation_rate: float,
 ) -> torch.Tensor:
     """
-    Computes pairwise conditional probabilities of sexual reproduction
-    (crossover + mutation) using a pair HMM over genotypes.
+    Computes pairwise conditional probabilities of a single generation of
+    sexual reproduction (crossover + mutation) using a pair HMM over genotypes.
 
     This compiles SNP-centric crossover dynamics into a cluster-centric tensor,
     thereby avoiding the need to reason about SNPs in the dynamics.
