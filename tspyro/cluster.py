@@ -1,5 +1,6 @@
 import collections
 import math
+from typing import Tuple
 
 import networkx as nx
 import numpy as np
@@ -38,6 +39,9 @@ def check_sparse_genotypes(data: dict):
     assert index.shape == (int(offsets[-1, -1]),)
     assert index.shape == values.shape
 
+    assert offsets[0, 0] == 0
+    assert (offsets[1:, 0] == offsets[:-1, 1]).all()
+
     return offsets, index, values
 
 
@@ -71,6 +75,43 @@ def make_fake_data(num_samples, num_variants):
     return data
 
 
+def transpose_sparse(data: dict, num_cols=0) -> dict:
+    """
+    Convert from row-oriented to column-oriented.
+    This function is its own inverse.
+
+    :param dict data: A dict representing sparse genotypes.
+    :param int num_cols: Optional number of columns.
+    :returns: A dict representing sparse genotypes.
+    :rtype: dict
+    """
+    old_offsets, old_index, old_values = check_sparse_genotypes(data)
+    num_rows = len(old_offsets)
+    num_cols = max(num_cols, 1 + int(old_index.max()))
+
+    # Initialize positions and create offsets.
+    position = torch.zeros(1 + num_cols, dtype=torch.long)
+    for r in range(num_rows):
+        beg, end = old_offsets[r].tolist()
+        index = old_index[beg:end]
+        position[1 + index] += 1
+    position.cumsum_(0)
+    new_offsets = torch.stack([position[:-1], position[1:]], dim=-1)
+
+    # Populate index and values.
+    new_index = torch.zeros_like(old_index)
+    new_values = torch.zeros_like(old_values)
+    for r in range(num_rows):
+        beg, end = old_offsets[r].tolist()
+        index = old_index[beg:end]
+        values = old_values[beg:end]
+        new_index[position[index]] = r
+        new_values[position[index]] = values
+        position[index] += 1
+
+    return dict(offsets=new_offsets, index=new_index, values=new_values)
+
+
 def naive_encoder(ts):
     """
     Make an encoding of the sparse genotype data naively: haplotype by haplotype.
@@ -82,7 +123,7 @@ def naive_encoder(ts):
     offsets = []
     index = []
     values = []
-    for haplo in tqdm.tqdm(ts.haplotypes(), total=ts.num_samples):
+    for haplo in tqdm(ts.haplotypes(), total=ts.num_samples):
         begin = len(index)
         for i, g in enumerate(haplo):
             assert g in "-01"
@@ -150,7 +191,7 @@ def make_clustering_gibbs(
     num_clusters: int,
     *,
     num_epochs: int = 10,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Clusters sparse genotypes using subsample-annealed Gibbs sampling.
 
@@ -290,18 +331,21 @@ def make_reproduction_tensor(
     clusters: torch.Tensor,
     *,
     crossover_rate: torch.Tensor,
-    mutation_rate: torch.Tensor,
+    mutation_rate: float,
 ) -> torch.Tensor:
     """
-    Computes pairwise conditional probabilities of sexual reproduction
-    (crossover + mutation) using a pair HMM over genotypes.
+    Computes pairwise conditional probabilities of a single generation of
+    sexual reproduction (crossover + mutation) using a pair HMM over genotypes.
+
+    This compiles SNP-centric crossover dynamics into a cluster-centric tensor,
+    thereby avoiding the need to reason about SNPs in the dynamics.
 
     :param torch.Tensor clusters: A ``(num_variants, num_clusters)``-shaped
         array of clusters.
     :param torch.Tensor crossover_rate: A ``num_variants-1``-long vector of
         probabilties of crossover between successive variants.
-    :param torch.Tensor mutation_rate: A ``num_variants``-long vector of
-        mutation probabilites of mutation at each variant site.
+    :param float mutation_rate: A scalar representing probability of mutation,
+        i.e. transitioning between wildtype and mutant each generation.
     :returns: A reproduction tensor of shape ``(C, C, C)`` where ``C`` is the
         number of clusters. This tensor is symmetric in the first two axes and
         a normalized probability mass function over the third axis.
@@ -309,7 +353,10 @@ def make_reproduction_tensor(
     """
     P, C = clusters.shape
     assert crossover_rate.shape == (P - 1,)
-    assert mutation_rate.shape == (P,)
+    mutation_rate = float(mutation_rate)
+    assert mutation_rate > 0
+    if clusters.dtype != torch.bool:
+        clusters = clusters.round().bool()
 
     # Construct a transition matrix.
     p = crossover_rate.neg().exp().mul(0.5).add(0.5)
@@ -320,12 +367,8 @@ def make_reproduction_tensor(
     transition[:, 1, 1] = p
 
     # Construct an mutation matrix.
-    p = mutation_rate.neg().exp().mul(0.5).add(0.5)
-    mutate = torch.zeros(P, 2, 2)
-    mutate[:, 0, 0] = p
-    mutate[:, 0, 1] = 1 - p
-    mutate[:, 1, 0] = 1 - p
-    mutate[:, 1, 1] = p
+    p = math.exp(-2 * mutation_rate) / 2 + 0.5
+    mutate = torch.tensor([[p, 1 - p], [1 - p, p]])
 
     # Apply pair HMM along each genotype.
     result = torch.zeros(C, C, C)
@@ -333,8 +376,8 @@ def make_reproduction_tensor(
     for p in tqdm.tqdm(range(P)):
         # Update with observation + mutation noise.
         c = clusters[p].long()
-        state[..., 0] *= mutate[p][c[:, None, None], c]
-        state[..., 1] *= mutate[p][c[None, :, None], c]
+        state[..., 0] *= mutate[c[:, None, None], c]
+        state[..., 1] *= mutate[c[None, :, None], c]
 
         # Transition via crossover.
         if p < P - 1:

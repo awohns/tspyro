@@ -364,6 +364,54 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     )
 
 
+def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
+    lat, long = latlong.unbind(-1)
+    x = lat.cos() * long.cos()
+    y = lat.cos() * long.sin()
+    z = lat.sin()
+    return torch.cat([x, y, z], dim=-1)
+
+
+def spherical_migration(parent, child, migration_scale, time, location):
+    """
+    Example::
+
+        model = Model(
+            ...,
+            migration_likelihood=spherical_migration
+        )
+    """
+    gap = time[parent] - time[child]  # in units of generations
+    gap = gap.clamp(
+        min=1
+    )  # avoid incorrect ordering of parents/children due to unconstrained
+    # time latent variable
+    # The following encodes that children migrate away from their parents
+    # following approximately Brownian motion with rate migration_scale.
+    parent_location = location.index_select(-2, parent)
+    child_location = location.index_select(-2, child)
+    # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
+    # in case you want to draw multiple samples.
+    migration_radius = migration_scale[..., None] * gap ** 0.5
+
+    # Assume migration folows a bivariate Laplace distribution, so that
+    # distance follows a Gamma(2,-) distribution.  While a more theoretically
+    # sound model might replace the Brownian motion's Wiener process with a
+    # heavier tailed Levy stable process, the Stable distribution's tail is so
+    # heavy that inference becomes intractable.  To give our unimodal
+    # variational posterior a chance of finding the right mode, we use a
+    # log-concave likelihood with tails heavier than Normal but lighter than
+    # Stable.  An alternative might be to anneal tail weight.
+    child_xyz = latlong_to_xyz(child_location)
+    parent_xyz = latlong_to_xyz(parent_location)
+    distance = torch.linalg.norm(child_xyz - parent_xyz, dim=-1, ord=2)
+    pyro.sample(
+        "migration",
+        dist.Gamma(2, 1 / migration_radius),
+        obs=distance,
+    )
+
+
 class WayPointMigration:
     """
     Example::
@@ -484,3 +532,54 @@ def fit_guide(
     median = guide.median()
     pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
     return pyro_time, location, migration_scale, guide, losses
+
+
+def single_chromosome_reaction_model(
+    reproduction_op: torch.Tensor,
+    leaf_times: torch.Tensor,
+    leaf_clusters: torch.Tensor,
+    num_time_steps: int,
+):
+    assert reproduction_op.dtype == torch.float
+    assert leaf_times.dtype == torch.long
+    assert leaf_clusters.dtype == torch.long
+    T = num_time_steps
+    C = len(reproduction_op)
+    N = len(leaf_times)
+    assert reproduction_op.shape == (C, C, C)
+    assert leaf_times.shape == (N,)
+    assert leaf_clusters.shape == (N,)
+    assert leaf_times.max().item() < num_time_steps
+    time_plate = pyro.plate("time", T, dim=-2)
+    step_plate = pyro.plate("step", T - 1, dim=-2)
+    cluster_plate = pyro.plate("cluster", C, dim=-1)
+    leaf_plate = pyro.plate("leaves", N, dim=-1)
+
+    # Sample density from an improper prior.
+    # Consider instead using an informative prior.
+    # Consider using HaarReparam(dim=-3) or DiscreteCosineReparam(dim=-3).
+    with time_plate, cluster_plate, pyro.mask(mask=False):
+        density = pyro.sample("density", dist.Exponential(1))
+
+    # Reaction factor.
+    # Note technically there are dependencies across cluster_plate.
+    with step_plate, cluster_plate:
+        parent_dist = density[:-1]
+        child_dist = density[1:]
+        prediction = torch.einsum(
+            "tc,td,cde->te",
+            parent_dist,  # [T,C]
+            parent_dist,  # [T,C]
+            reproduction_op,  # [C,C,C] Applies crossover.
+        )  # [T,C]
+        # Renormalize after selection_op.
+        prediction = prediction / prediction.sum(-1, True)
+        pyro.sample(
+            "reaction",
+            dist.Normal(prediction, prediction.sqrt()),  # approximate multinomial
+            obs=child_dist,
+        )
+
+    # Observation of samples with known (time, genome).
+    with leaf_plate:
+        pyro.factor("obs", density[leaf_times, leaf_clusters].log())
