@@ -44,11 +44,14 @@ class BaseModel(PyroModule):
         # conditional coalescent prior
         timepoints = torch.as_tensor(prior.timepoints, dtype=torch.get_default_dtype())
         timepoints = timepoints.log1p()
-        grid_data = torch.as_tensor(prior.grid_data[:], dtype=torch.get_default_dtype())
+        prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
+        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
+        self.prior_loc = self.prior_loc.nan_to_num(1)
         deltas = (timepoints - self.prior_loc[:, None]) ** 2
         self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
+        self.prior_scale = self.prior_scale.nan_to_num(1)
         self.leaf_location = leaf_location
 
     def get_mut_edges(self):
@@ -152,7 +155,7 @@ class BaseModel(PyroModule):
                 parent, val = self.average_edges(parent_edges, locations)
                 locations[parent] = val
         return torch.tensor(
-            locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa
+            locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
         )
 
 
@@ -176,7 +179,8 @@ class NaiveModel(BaseModel):
                 ),  # False turns off prior but uses it for initialisation
             )  # internal time is modelled in logspace
 
-            internal_location = self.location_model()
+            if self.leaf_location is not None:
+                internal_location = self.location_model()
 
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
@@ -221,6 +225,13 @@ class NaiveModel(BaseModel):
 
 
 def mean_field_location():
+    """
+    To create a conditioned version of this model, use::
+
+        location = pyro.condition(
+            data={"internal_location": true_locations}
+        )(mean_field_location)
+    """
     # Sample location from a flat prior, we'll add a pyro.factor statement later.
     return pyro.sample(
         "internal_location",
@@ -290,6 +301,29 @@ class ReparamLocation:
         return internal_location
 
 
+def great_circle(lon1, lat1, lon2, lat2):
+    lon1 = torch.deg2rad(lon1)
+    lat1 = torch.deg2rad(lat1)
+    lon2 = torch.deg2rad(lon2)
+    lat2 = torch.deg2rad(lat2)
+    return 6371 * (
+        torch.acos(
+            torch.sin(lat1) * torch.sin(lat2)
+            + torch.cos(lat1) * torch.cos(lat2) * torch.cos(lon1 - lon2)
+        )
+    )
+
+
+def great_secant(lon1, lat1, lon2, lat2):
+    lon = torch.deg2rad(torch.stack([lon1, lon2]))
+    lat = torch.deg2rad(torch.stack([lat1, lat2]))
+    x = torch.cos(lat) * torch.cos(lon)
+    y = torch.cos(lat) * torch.sin(lon)
+    z = torch.sin(lat)
+    r2 = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2 + (z[0] - z[1]) ** 2
+    return r2.clamp(min=1e-10).sqrt()
+
+
 def euclidean_migration(parent, child, migration_scale, time, location):
     """
     Example::
@@ -312,7 +346,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # in case you want to draw multiple samples.
     migration_radius = migration_scale[..., None] * gap ** 0.5
 
-    # Assume migration folows a bivariate Laplace distribution, so that
+    # Assume migration folows a bivariate normal distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
     # sound model might replace the Brownian motion's Wiener process with a
     # heavier tailed Levy stable process, the Stable distribution's tail is so
@@ -320,12 +354,22 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # variational posterior a chance of finding the right mode, we use a
     # log-concave likelihood with tails heavier than Normal but lighter than
     # Stable.  An alternative might be to anneal tail weight.
-    distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
-    pyro.sample(
-        "migration",
-        dist.Gamma(2, 1 / migration_radius),
-        obs=distance,
-    )
+
+    if False:
+        distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
+        distance = distance.clamp(min=1e-6)
+        pyro.sample(
+            "migration",
+            dist.Gamma(2, 1 / migration_radius),
+            obs=distance,
+        )
+    # This is equivalent to
+    else:
+        pyro.sample(
+            "migration",
+            dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+            obs=child_location,
+        )
 
 
 def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
@@ -427,6 +471,7 @@ def fit_guide(
     learning_rate=0.005,
     log_every=100,
 ):
+    assert isinstance(Model, type)
 
     pyro.set_rng_seed(20210518)
     pyro.clear_param_store()
@@ -444,12 +489,16 @@ def fit_guide(
     def init_loc_fn(site):
         # TIME
         if site["name"] == "internal_time":
+            prior_grid_data = priors.grid_data[
+                priors.row_lookup[ts.num_samples :]  # noqa: E203
+            ]
             prior_init = np.einsum(
-                "t,nt->n", priors.timepoints, (priors.grid_data[:])
-            ) / np.sum(priors.grid_data[:], axis=1)
+                "t,nt->n", priors.timepoints, (prior_grid_data)
+            ) / np.sum(prior_grid_data, axis=1)
             internal_time = torch.as_tensor(
                 prior_init, dtype=torch.get_default_dtype()
             )  # / Ne
+            internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         # GEOGRAPHY.
         if site["name"] == "internal_location":
