@@ -225,6 +225,13 @@ class NaiveModel(BaseModel):
 
 
 def mean_field_location():
+    """
+    To create a conditioned version of this model, use::
+
+        location = pyro.condition(
+            data={"internal_location": true_locations}
+        )(mean_field_location)
+    """
     # Sample location from a flat prior, we'll add a pyro.factor statement later.
     return pyro.sample(
         "internal_location",
@@ -339,7 +346,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # in case you want to draw multiple samples.
     migration_radius = migration_scale[..., None] * gap ** 0.5
 
-    # Assume migration folows a bivariate Laplace distribution, so that
+    # Assume migration folows a bivariate normal distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
     # sound model might replace the Brownian motion's Wiener process with a
     # heavier tailed Levy stable process, the Stable distribution's tail is so
@@ -348,20 +355,21 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # log-concave likelihood with tails heavier than Normal but lighter than
     # Stable.  An alternative might be to anneal tail weight.
 
-    distance = great_secant(
-        child_location[:, 1],
-        child_location[:, 0],
-        parent_location[:, 1],
-        parent_location[:, 0],
-    )
-    distance = distance.clamp(min=1e-6)
-    distance = torch.rad2deg(distance)
-    # distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
-    pyro.sample(
-        "migration",
-        dist.Gamma(2, 1 / migration_radius),
-        obs=distance,
-    )
+    if False:
+        distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
+        distance = distance.clamp(min=1e-6)
+        pyro.sample(
+            "migration",
+            dist.Gamma(2, 1 / migration_radius),
+            obs=distance,
+        )
+    # This is equivalent to
+    else:
+        pyro.sample(
+            "migration",
+            dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+            obs=child_location,
+        )
 
 
 def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
@@ -463,6 +471,7 @@ def fit_guide(
     learning_rate=0.005,
     log_every=100,
 ):
+    assert isinstance(Model, type)
 
     pyro.set_rng_seed(20210518)
     pyro.clear_param_store()
