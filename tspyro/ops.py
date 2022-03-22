@@ -73,3 +73,16 @@ class CumsumUpTree:
             child_result = result.index_select(dim, child)
             result = result.scatter_add(dim, parent, child_result)
         return result
+
+    def inverse(self, data: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        if dim >= 0:
+            dim -= data.dim()
+        if dim != -1:
+            raise NotImplementedError(f"TODO support dim={dim}")
+
+        # Apply stages in succession.
+        result = data
+        for child, parent in reversed(self.stages):
+            child_result = result.index_select(dim, child).neg()
+            result = result.scatter_add(dim, parent, child_result)
+        return result

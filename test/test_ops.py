@@ -48,9 +48,14 @@ def test_cumsum_up_tree(num_leaves, num_internal, branching_factor):
     # Smoke test that gradients work.
     torch.autograd.grad(actual.sum(), [data])
     actual.detach_()
+    data.detach_()
 
     # Check value. This computation works only because of our ordering.
     expected = data.detach().clone()
     for edge in ts.edges():
         expected[edge.parent] += expected[edge.child]
-    assert torch.allclose(expected, actual, atol=1e-4)
+    assert torch.allclose(actual, expected, atol=1e-4)
+
+    # Check inverse.
+    actual_data = cumsum.inverse(actual)
+    assert torch.allclose(actual_data, data, atol=1e-3)
