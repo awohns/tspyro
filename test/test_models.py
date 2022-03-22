@@ -2,6 +2,7 @@ import os
 
 import pyro
 import pyslim
+import pytest
 import torch
 import tsdate
 from pyro import poutine
@@ -9,12 +10,14 @@ from tspyro.models import euclidean_migration
 from tspyro.models import fit_guide
 from tspyro.models import mean_field_location
 from tspyro.models import NaiveModel
+from tspyro.models import TimeDiffModel
 
 REPO = os.path.dirname(os.path.dirname(__file__))
 EXAMPLES = os.path.join(REPO, "examples")
 
 
-def test_smoke():
+@pytest.mark.parametrize("Model", [NaiveModel, TimeDiffModel])
+def test_smoke(Model):
     ts = pyslim.load(os.path.join(EXAMPLES, "spatial_sim.trees")).simplify()
     recap_ts = ts.recapitate(recombination_rate=1e-8, Ne=50).simplify()
 
@@ -42,7 +45,7 @@ def test_smoke():
         migration_likelihood=euclidean_migration,
         location_model=mean_field_location,
         steps=3,
-        Model=NaiveModel,
+        Model=Model,
     )
 
     # Test vectorized sampling.

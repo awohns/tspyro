@@ -71,6 +71,7 @@ class CumsumUpTree:
         result = data
         for child, parent in self.stages:
             child_result = result.index_select(dim, child)
+            parent = parent.expand_as(child_result)
             result = result.scatter_add(dim, parent, child_result)
         return result
 
@@ -84,5 +85,6 @@ class CumsumUpTree:
         result = data
         for child, parent in reversed(self.stages):
             child_result = result.index_select(dim, child).neg()
+            parent = parent.expand_as(child_result)
             result = result.scatter_add(dim, parent, child_result)
         return result

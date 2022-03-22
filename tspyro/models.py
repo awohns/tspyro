@@ -12,6 +12,7 @@ from pyro.infer.autoguide import AutoNormal
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
+from tspyro.ops import CumsumUpTree
 
 
 class BaseModel(PyroModule):
@@ -42,7 +43,7 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        timepoints = torch.as_tensor(prior.timepoints, dtype=torch.get_default_dtype())
+        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
         timepoints = timepoints.log1p()
         prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
         grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
@@ -221,6 +222,72 @@ class NaiveModel(BaseModel):
                 self.migration_likelihood(
                     self.parent, self.child, migration_scale, time, location
                 )
+        return time, gap, location, migration_scale
+
+
+class TimeDiffModel(BaseModel):
+    """
+    This is like NaiveModel but with a time parameterization that has better
+    geometry, in particular, we don't need to include hard constraints for
+    positive time gaps.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.migration_likelihood = kwargs.pop("migration_likelihood", None)
+        self.location_model = kwargs.pop("location_model", mean_field_location)
+        ts = args[0] if args else kwargs["ts"]
+        super().__init__(*args, **kwargs)
+        with torch.no_grad():
+            # Initialize the prior time differences.
+            self.cumsum_up_tree = CumsumUpTree(ts)
+            time = torch.zeros(self.num_nodes)
+            time[..., self.is_internal] = self.prior_loc.exp()
+            diff = self.cumsum_up_tree.inverse(time)
+            # Ensure parents are at least one generation older than children.
+            diff = (diff - 1).clamp(min=0.1)
+            self.prior_diff_loc = diff[self.is_internal].log()
+
+    def forward(self):
+        edges_plate = pyro.plate("edges", len(self.parent), dim=-1)
+        internal_nodes_plate = pyro.plate("internal_nodes", self.num_internal, dim=-1)
+
+        # Integrate times up the tree, saving result via pyro.deterministic.
+        with internal_nodes_plate:
+            internal_diff = pyro.sample(
+                "internal_diff",
+                dist.LogNormal(self.prior_diff_loc, self.prior_scale),
+            )
+            batch_shape = internal_diff.shape[:-1]
+        diff = torch.zeros(batch_shape + self.is_internal.shape)
+        diff[..., self.is_internal] = internal_diff
+        diff = diff + 1  # Parents are at least one generation older than children.
+        time = self.cumsum_up_tree(diff)
+        pyro.deterministic("internal_time", time.detach()[..., self.is_internal])
+
+        # Mutation part of the model.
+        gap = time[..., self.parent] - time[..., self.child]
+        with edges_plate:
+            rate = (gap * self.span * self.mutation_rate).clamp(min=1e-8)
+            pyro.sample("mutations", dist.Poisson(rate), obs=self.mutations)
+
+        # Geographic part of the model.
+        location = None
+        if self.migration_likelihood is not None:
+            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+            with internal_nodes_plate:
+                internal_location = self.location_model()
+            location = torch.cat(
+                [
+                    self.leaf_location.expand(batch_shape + (-1, -1)),
+                    internal_location,
+                ],
+                -2,
+            )
+            with edges_plate:
+                self.migration_likelihood(
+                    self.parent, self.child, migration_scale, time, location
+                )
+
         return time, gap, location, migration_scale
 
 
@@ -500,6 +567,10 @@ def fit_guide(
             )  # / Ne
             internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
+        if site["name"] == "internal_diff":
+            internal_diff = model.prior_diff_loc.exp()
+            internal_diff.sub_(1).clamp_(min=0.1)
+            return internal_diff
         # GEOGRAPHY.
         if site["name"] == "internal_location":
             initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
