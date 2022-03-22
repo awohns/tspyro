@@ -45,6 +45,7 @@ def test_smoke():
         Model=NaiveModel,
     )
 
+    # Test vectorized sampling.
     num_samples = 4
     with pyro.plate("particles", num_samples, dim=-2):
         guide_trace = poutine.trace(guide).get_trace()

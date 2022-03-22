@@ -191,8 +191,8 @@ class NaiveModel(BaseModel):
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
 
         # Next add a factor for time gaps between parents and children.
-        gap = time[self.parent] - time[self.child]
-        with pyro.plate("edges", len(gap)):
+        gap = time[..., self.parent] - time[..., self.child]
+        with pyro.plate("edges", gap.size(-1)):
             # Penalize gaps that are less than 1.
             clamped_gap = gap.clamp(min=1)
             # TODO should we multiply this by e.g. 0.1
@@ -333,7 +333,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             migration_likelihood=euclidean_migration
         )
     """
-    gap = time[parent] - time[child]  # in units of generations
+    gap = time[..., parent] - time[..., child]  # in units of generations
     gap = gap.clamp(
         min=1
     )  # avoid incorrect ordering of parents/children due to unconstrained
