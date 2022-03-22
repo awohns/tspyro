@@ -1,3 +1,4 @@
+import numpy  # noqa, avoids segfault if torch is imported before numpy
 import pyro
 
 
