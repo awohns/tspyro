@@ -6,6 +6,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 from pyro import poutine
+from pyro.distributions import constraints
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
@@ -364,10 +365,21 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             obs=distance,
         )
     # This is equivalent to
-    else:
+    elif False:
         pyro.sample(
             "migration",
             dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+            obs=child_location,
+        )
+    # But instead we use a slightly heavier tailed version
+    # This allows for the possibility of bigger gaps to happen
+    else:
+        df = pyro.param(
+            "migration_df", lambda: torch.tensor(10.0), constraint=constraints.positive
+        )
+        pyro.sample(
+            "migration",
+            dist.StudentT(df, parent_location, migration_radius[..., None]).to_event(1),
             obs=child_location,
         )
 
