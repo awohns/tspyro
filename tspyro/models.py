@@ -242,7 +242,7 @@ class TimeDiffModel(BaseModel):
             self.cumsum_up_tree = CumlogsumexpUpTree(ts)
             time = torch.zeros(self.num_nodes)
             time[..., self.is_internal] = self.prior_loc.exp()
-            diff = self.cumsum_up_tree.inverse(time)
+            diff = self.cumsum_up_tree.inverse(time).clamp(min=0.1)
             self.prior_diff_loc = diff[self.is_internal].log()
 
     def forward(self):
