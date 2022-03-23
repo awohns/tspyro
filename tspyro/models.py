@@ -243,8 +243,6 @@ class TimeDiffModel(BaseModel):
             time = torch.zeros(self.num_nodes)
             time[..., self.is_internal] = self.prior_loc.exp()
             diff = self.cumsum_up_tree.inverse(time)
-            # Ensure parents are at least one generation older than children.
-            diff = (diff - 1).clamp(min=0.1)
             self.prior_diff_loc = diff[self.is_internal].log()
 
     def forward(self):
@@ -259,13 +257,12 @@ class TimeDiffModel(BaseModel):
             )
             batch_shape = internal_diff.shape[:-1]
         diff = torch.zeros(batch_shape + self.is_internal.shape)
-        diff[..., self.is_internal] = internal_diff + 1
-        time = self.cumsum_up_tree(diff)  # sum version
-        # time = self.cumsum_up_tree(diff.exp()).log()  # softmax version
+        diff[..., self.is_internal] = internal_diff
+        time = self.cumsum_up_tree(diff)
         pyro.deterministic("internal_time", time.detach()[..., self.is_internal])
 
         # Mutation part of the model.
-        gap = time[..., self.parent] - time[..., self.child]
+        gap = (time[..., self.parent] - time[..., self.child]).clamp(min=1)
         with edges_plate:
             rate = (gap * self.span * self.mutation_rate).clamp(min=1e-8)
             pyro.sample("mutations", dist.Poisson(rate), obs=self.mutations)
