@@ -259,8 +259,7 @@ class TimeDiffModel(BaseModel):
             )
             batch_shape = internal_diff.shape[:-1]
         diff = torch.zeros(batch_shape + self.is_internal.shape)
-        diff[..., self.is_internal] = internal_diff
-        diff = diff + 1  # Parents are at least one generation older than children.
+        diff[..., self.is_internal] = internal_diff + 1
         time = self.cumsum_up_tree(diff)  # sum version
         # time = self.cumsum_up_tree(diff.exp()).log()  # softmax version
         pyro.deterministic("internal_time", time.detach()[..., self.is_internal])
@@ -273,6 +272,7 @@ class TimeDiffModel(BaseModel):
 
         # Geographic part of the model.
         location = None
+        migration_scale = None
         if self.migration_likelihood is not None:
             migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
             with internal_nodes_plate:

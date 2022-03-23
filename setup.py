@@ -14,7 +14,7 @@ setup(
     python_requires=">=3.6",
     setup_requires=["setuptools_scm"],
     install_requires=[
-        "tskit==0.3.7",
+        "tskit",
         "tsdate",
         "flake8",
         "mypy>=0.812",
