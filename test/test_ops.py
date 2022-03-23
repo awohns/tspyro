@@ -1,7 +1,9 @@
+import math
 from collections import namedtuple
 
 import pytest
 import torch
+from tspyro.ops import CumlogsumexpUpTree
 from tspyro.ops import CumsumUpTree
 
 Edge = namedtuple("Edge", "child, parent")
@@ -36,14 +38,15 @@ def make_fake_ts(num_leaves: int, num_internal: int, branching_factor: int = 2):
     ],
     ids=str,
 )
-def test_cumsum_up_tree(num_leaves, num_internal, branching_factor):
+@pytest.mark.parametrize("Aggregate", [CumsumUpTree, CumlogsumexpUpTree])
+def test_aggregate_up_tree(num_leaves, num_internal, branching_factor, Aggregate):
     ts = make_fake_ts(num_leaves, num_internal, branching_factor)
     num_nodes = num_leaves + num_internal
     data = torch.rand(num_nodes).requires_grad_()
 
     # Run method under test.
-    cumsum = CumsumUpTree(ts)
-    actual = cumsum(data)
+    accumulate = Aggregate(ts)
+    actual = accumulate(data)
 
     # Smoke test that gradients work.
     torch.autograd.grad(actual.sum(), [data])
@@ -51,11 +54,25 @@ def test_cumsum_up_tree(num_leaves, num_internal, branching_factor):
     data.detach_()
 
     # Check value. This computation works only because of our ordering.
-    expected = data.detach().clone()
-    for edge in ts.edges():
-        expected[edge.parent] += expected[edge.child]
+    if Aggregate is CumsumUpTree:
+        expected = data.detach().clone()
+        for edge in ts.edges():
+            expected[edge.parent] += expected[edge.child]
+    else:
+        expected = torch.zeros_like(data)
+        expected[:num_leaves] = data[:num_leaves]
+        expected[num_leaves:] = -math.inf
+        pending = torch.zeros(num_nodes, dtype=torch.long)
+        for _, p in ts.edges():
+            pending[p] += 1
+        for c, p in ts.edges():
+            expected[p] = torch.logaddexp(expected[p], expected[c])
+            pending[p] -= 1
+            if pending[p] == 0:  # all children have been aggregated
+                expected[p] += data[p]
+        assert pending.eq(0).all()
     assert torch.allclose(actual, expected, atol=1e-4)
 
     # Check inverse.
-    actual_data = cumsum.inverse(actual)
+    actual_data = accumulate.inverse(actual)
     assert torch.allclose(actual_data, data, atol=1e-3)

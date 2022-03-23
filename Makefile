@@ -1,5 +1,9 @@
 SHELL := /bin/bash
 
+install:
+	pip install torch-scatter -f https://data.pyg.org/whl/torch-1.11.0+cpu.htm
+	pip install -e .[test]
+
 lint: FORCE
 	flake8
 	black --extend-exclude=\.ipynb --check .

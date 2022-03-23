@@ -23,6 +23,7 @@ setup(
         "pyro-ppl>=1.7",
         "pytest",
         "pandas",
+        "torch-scatter",  # from https://data.pyg.org/whl/torch-1.11.0+cpu.htm
     ],
     extras_require={
         "test": ["pyslim"],

@@ -1,4 +1,6 @@
 import logging
+from abc import ABC
+from abc import abstractmethod
 from collections import defaultdict
 
 import torch
@@ -6,12 +8,9 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-class CumsumUpTree:
+class AccumulateUpTree(ABC):
     """
-    Computes a cumulative sum up a tree, so each node gets the sum over its
-    descendents including itself.  Note in time trees, if a descendent is
-    reachable along multiple paths, it will be summed multiple times, once per
-    path.
+    Generic semiring programming up a tree.
     """
 
     def __init__(self, ts):
@@ -43,17 +42,19 @@ class CumsumUpTree:
         # Compute a series of sparse tensors, one per rank.
         self.stages = []
         for _, parents in sorted(rank_to_parents.items()):
-            stage = torch.tensor(
+            child_parent = torch.tensor(
                 [
                     [child, parent]
                     for parent in parents
                     for child in parent_to_children[parent]
                 ]
             ).T.contiguous()
-            self.stages.append(stage)
+            mask = torch.zeros(num_nodes, dtype=torch.bool)
+            mask[parents] = True
+            self.stages.append((child_parent, mask))
 
         # Log computational complexity.
-        stage_sizes = [stage.size(-1) for stage in self.stages]
+        stage_sizes = [stage[0].size(-1) for stage in self.stages]
         num_edges = sum(stage_sizes)
         logger.info(
             "Created a CumsumUpTree "
@@ -62,17 +63,18 @@ class CumsumUpTree:
         )
 
     def __call__(self, data: torch.Tensor, dim: int = -1) -> torch.Tensor:
+
         if dim >= 0:
             dim -= data.dim()
         if dim != -1:
             raise NotImplementedError(f"TODO support dim={dim}")
 
         # Apply stages in succession.
-        result = data
-        for child, parent in self.stages:
-            child_result = result.index_select(dim, child)
-            parent = parent.expand_as(child_result)
-            result = result.scatter_add(dim, parent, child_result)
+        result = data.clone()
+        for (child, parent), mask in self.stages:
+            diff = self._aggregate_children(child, parent, result, dim)
+            mask = mask.expand_as(data)
+            result[mask] += diff[mask]
         return result
 
     def inverse(self, data: torch.Tensor, dim: int = -1) -> torch.Tensor:
@@ -82,9 +84,61 @@ class CumsumUpTree:
             raise NotImplementedError(f"TODO support dim={dim}")
 
         # Apply stages in succession.
-        result = data
-        for child, parent in reversed(self.stages):
-            child_result = result.index_select(dim, child).neg()
-            parent = parent.expand_as(child_result)
-            result = result.scatter_add(dim, parent, child_result)
+        result = data.clone()
+        for (child, parent), mask in reversed(self.stages):
+            diff = self._aggregate_children(child, parent, result, dim)
+            mask = mask.expand_as(data)
+            result[mask] -= diff[mask]
         return result
+
+    @abstractmethod
+    def _aggregate_children(self, children, parent, data, dim) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class CumsumUpTree(AccumulateUpTree):
+    """
+    Computes a cumulative sum up a tree, so each node gets the sum over its
+    descendents including itself.  Note in time trees, if a descendent is
+    reachable along multiple paths, it will be summed multiple times, once per
+    path.
+    """
+
+    def _aggregate_children(self, child, parent, data, dim):
+        """
+        Compute a numerically stabile logsumexp by shifting by max.
+        """
+        child_data = data.index_select(dim, child)
+        parent = parent.expand_as(child_data)
+        return torch.zeros_like(data).scatter_add(dim, parent, child_data)
+
+
+class CumlogsumexpUpTree(AccumulateUpTree):
+    """
+    Computes a cumulative logsumexp up a tree, so each node gets the sum over
+    its descendents including itself.  Note in time trees, if a descendent is
+    reachable along multiple paths, it will be summed multiple times, once per
+    path.
+    """
+
+    def _aggregate_children(self, child, parent, data, dim):
+        """
+        Compute a numerically stabile logsumexp by shifting by max.
+        """
+        from torch_scatter import scatter
+
+        if dim != -1:
+            raise NotImplementedError(f"TODO support dim={dim}")
+
+        child_data = data.index_select(dim, child)  # [E]
+        parent = parent.expand_as(child_data)  # [E]
+        max_child = scatter(
+            child_data, parent, dim=dim, reduce="max", dim_size=data.shape[dim]
+        )  # [N]
+        exp_child_data = (child_data - max_child[..., parent]).exp()  # [E]
+        logsumexp_child = (
+            max_child
+            + torch.zeros_like(max_child).scatter_add(dim, parent, exp_child_data).log()
+        )  # [N]
+        assert logsumexp_child.shape == data.shape
+        return logsumexp_child

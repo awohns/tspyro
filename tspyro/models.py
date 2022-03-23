@@ -261,7 +261,8 @@ class TimeDiffModel(BaseModel):
         diff = torch.zeros(batch_shape + self.is_internal.shape)
         diff[..., self.is_internal] = internal_diff
         diff = diff + 1  # Parents are at least one generation older than children.
-        time = self.cumsum_up_tree(diff)
+        time = self.cumsum_up_tree(diff)  # sum version
+        # time = self.cumsum_up_tree(diff.exp()).log()  # softmax version
         pyro.deterministic("internal_time", time.detach()[..., self.is_internal])
 
         # Mutation part of the model.
