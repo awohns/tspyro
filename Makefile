@@ -16,7 +16,7 @@ format: FORCE
 	# isort .
 	# python scripts/update_headers.py
 
-test: lint FORCE
+test: FORCE
 	pytest -v -n auto test
 
 FORCE:

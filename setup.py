@@ -14,19 +14,23 @@ setup(
     python_requires=">=3.6",
     setup_requires=["setuptools_scm"],
     install_requires=[
-        "tskit",
-        "tsdate",
-        "flake8",
-        "mypy>=0.812",
-        "numpy",
         "networkx",
-        "pyro-ppl>=1.7",
-        "pytest",
+        "numpy",
         "pandas",
+        "pyro-ppl>=1.7",
+        "python-louvain",
         "torch-scatter",  # from https://data.pyg.org/whl/torch-1.11.0+cpu.htm
+        "tsdate",
+        "tskit",
     ],
     extras_require={
-        "test": ["pyslim"],
+        "test": [
+            "black",
+            "flake8",
+            "mypy>=0.812",
+            "pyslim",
+            "pytest",
+        ],
     },
     project_urls={
         "Source": "https://github.com/awohns/tspyro",
