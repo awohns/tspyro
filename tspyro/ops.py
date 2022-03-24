@@ -105,20 +105,38 @@ class CumsumUpTree(AccumulateUpTree):
     """
 
     def _aggregate_children(self, child, parent, data, dim):
-        """
-        Compute a numerically stabile logsumexp by shifting by max.
-        """
         child_data = data.index_select(dim, child)
         parent = parent.expand_as(child_data)
         return torch.zeros_like(data).scatter_add(dim, parent, child_data)
 
 
+class CummaxUpTree(AccumulateUpTree):
+    """
+    Computes a cumulative max up a tree, so each node gets the max over its
+    descendents plus its own contribution. Note in time trees, if a descendent
+    is reachable along multiple paths, it will be summed multiple times, once
+    per path.
+    """
+
+    def _aggregate_children(self, child, parent, data, dim):
+        from torch_scatter import scatter
+
+        if dim != -1:
+            raise NotImplementedError(f"TODO support dim={dim}")
+
+        child_data = data.index_select(dim, child)  # [E]
+        parent = parent.expand_as(child_data)  # [E]
+        return scatter(
+            child_data, parent, dim=dim, reduce="max", dim_size=data.shape[dim]
+        )
+
+
 class CumlogsumexpUpTree(AccumulateUpTree):
     """
-    Computes a cumulative logsumexp up a tree, so each node gets the sum over
-    its descendents including itself.  Note in time trees, if a descendent is
-    reachable along multiple paths, it will be summed multiple times, once per
-    path.
+    Computes a cumulative logsumexp up a tree, so each node gets the logsumexp
+    over its descendents plus its own contribution.  Note in time trees, if a
+    descendent is reachable along multiple paths, it will be summed multiple
+    times, once per path.
     """
 
     def _aggregate_children(self, child, parent, data, dim):

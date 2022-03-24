@@ -359,16 +359,16 @@ def make_reproduction_tensor(
         clusters = clusters.round().bool()
 
     # Construct a transition matrix.
-    p = crossover_rate.neg().exp().mul(0.5).add(0.5)
+    ps = crossover_rate.neg().exp().mul(0.5).add(0.5)
     transition = torch.zeros(P - 1, 2, 2)
-    transition[:, 0, 0] = p
-    transition[:, 0, 1] = 1 - p
-    transition[:, 1, 0] = 1 - p
-    transition[:, 1, 1] = p
+    transition[:, 0, 0] = ps
+    transition[:, 0, 1] = 1 - ps
+    transition[:, 1, 0] = 1 - ps
+    transition[:, 1, 1] = ps
 
     # Construct an mutation matrix.
-    p = math.exp(-2 * mutation_rate) / 2 + 0.5
-    mutate = torch.tensor([[p, 1 - p], [1 - p, p]])
+    q = math.exp(-2 * mutation_rate) / 2 + 0.5
+    mutate = torch.tensor([[q, 1 - q], [1 - q, q]])
 
     # Apply pair HMM along each genotype.
     result = torch.zeros(C, C, C)

@@ -4,6 +4,7 @@ from collections import namedtuple
 import pytest
 import torch
 from tspyro.ops import CumlogsumexpUpTree
+from tspyro.ops import CummaxUpTree
 from tspyro.ops import CumsumUpTree
 
 Edge = namedtuple("Edge", "child, parent")
@@ -15,6 +16,13 @@ class MockTS:
 
     def edges(self):
         return self._edges
+
+
+OPS = {
+    CumsumUpTree: torch.add,
+    CummaxUpTree: torch.max,
+    CumlogsumexpUpTree: torch.logaddexp,
+}
 
 
 def make_fake_ts(num_leaves: int, num_internal: int, branching_factor: int = 2):
@@ -38,7 +46,7 @@ def make_fake_ts(num_leaves: int, num_internal: int, branching_factor: int = 2):
     ],
     ids=str,
 )
-@pytest.mark.parametrize("Aggregate", [CumsumUpTree, CumlogsumexpUpTree])
+@pytest.mark.parametrize("Aggregate", [CumsumUpTree, CummaxUpTree, CumlogsumexpUpTree])
 def test_aggregate_up_tree(num_leaves, num_internal, branching_factor, Aggregate):
     ts = make_fake_ts(num_leaves, num_internal, branching_factor)
     num_nodes = num_leaves + num_internal
@@ -59,6 +67,7 @@ def test_aggregate_up_tree(num_leaves, num_internal, branching_factor, Aggregate
         for edge in ts.edges():
             expected[edge.parent] += expected[edge.child]
     else:
+        op = OPS[Aggregate]
         expected = torch.zeros_like(data)
         expected[:num_leaves] = data[:num_leaves]
         expected[num_leaves:] = -math.inf
@@ -66,7 +75,7 @@ def test_aggregate_up_tree(num_leaves, num_internal, branching_factor, Aggregate
         for _, p in ts.edges():
             pending[p] += 1
         for c, p in ts.edges():
-            expected[p] = torch.logaddexp(expected[p], expected[c])
+            expected[p] = op(expected[p], expected[c])
             pending[p] -= 1
             if pending[p] == 0:  # all children have been aggregated
                 expected[p] += data[p]
