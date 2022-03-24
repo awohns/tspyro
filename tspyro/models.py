@@ -12,7 +12,7 @@ from pyro.infer.autoguide import AutoNormal
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
-from tspyro.ops import CumlogsumexpUpTree
+from tspyro.ops import CummaxUpTree
 
 
 class BaseModel(PyroModule):
@@ -239,7 +239,7 @@ class TimeDiffModel(BaseModel):
         super().__init__(*args, **kwargs)
         with torch.no_grad():
             # Initialize the prior time differences.
-            self.cumsum_up_tree = CumlogsumexpUpTree(ts)
+            self.cumsum_up_tree = CummaxUpTree(ts)
             time = torch.zeros(self.num_nodes)
             time[..., self.is_internal] = self.prior_loc.exp()
             diff = self.cumsum_up_tree.inverse(time).clamp(min=0.1)
