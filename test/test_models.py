@@ -16,8 +16,15 @@ REPO = os.path.dirname(os.path.dirname(__file__))
 EXAMPLES = os.path.join(REPO, "examples")
 
 
-@pytest.mark.parametrize("Model", [NaiveModel, TimeDiffModel])
-def test_smoke(Model):
+@pytest.mark.parametrize(
+    "Model, mask_locations",
+    [
+        (NaiveModel, 0),
+        (NaiveModel, 10),
+        (TimeDiffModel, 0),
+    ],
+)
+def test_smoke(Model, mask_locations):
     ts = pyslim.load(os.path.join(EXAMPLES, "spatial_sim.trees")).simplify()
     recap_ts = ts.recapitate(recombination_rate=1e-8, Ne=50).simplify()
 
@@ -38,11 +45,22 @@ def test_smoke(Model):
         progress=True,
     )
 
+    # Optionally mask out the last mas_loctions-many nodes, to exclude them
+    # from the migration likelihood.
+    migration_likelihood = euclidean_migration
+    if mask_locations:
+        assert mask_locations < recap_ts.num_nodes
+        mask = torch.ones(recap_ts.num_edges, dtype=torch.bool)
+        for e, edge in enumerate(recap_ts.edges()):
+            if edge.child >= mask_locations:
+                mask[e] = False
+        migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
+
     pyro_time, location, migration_scale, guide, losses = fit_guide(
         recap_ts,
         leaf_location,
         priors,
-        migration_likelihood=euclidean_migration,
+        migration_likelihood=migration_likelihood,
         location_model=mean_field_location,
         steps=3,
         Model=Model,
