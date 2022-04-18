@@ -123,7 +123,7 @@ def naive_encoder(ts):
     offsets = []
     index = []
     values = []
-    for haplo in tqdm(ts.haplotypes(), total=ts.num_samples):
+    for haplo in tqdm.tqdm(ts.haplotypes(), total=ts.num_samples):
         begin = len(index)
         for i, g in enumerate(haplo):
             assert g in "-01"
