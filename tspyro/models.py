@@ -8,11 +8,14 @@ import torch
 from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
-from pyro.infer.autoguide import AutoNormal
+from pyro.infer.autoguide import AutoNormal, AutoLowRankMultivariateNormal
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import CummaxUpTree
+import tsdate
+
+from sklearn.metrics import mean_squared_log_error
 
 
 class BaseModel(PyroModule):
@@ -42,17 +45,50 @@ class BaseModel(PyroModule):
         self.Ne = float(Ne)
         self.mutation_rate = mutation_rate
 
+        # Population-specific migration scales
+        self.num_populations = ts.num_populations
+        self.population = torch.tensor(ts.tables.nodes.population,
+                dtype=torch.long)
+
         # conditional coalescent prior
-        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
-        timepoints = timepoints.log1p()
-        prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
-        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
-        grid_data = grid_data / grid_data.sum(1, True)
-        self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
-        self.prior_loc = self.prior_loc.nan_to_num(1)
-        deltas = (timepoints - self.prior_loc[:, None]) ** 2
-        self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
-        self.prior_scale = self.prior_scale.nan_to_num(1)
+        if True:
+            span_data = tsdate.prior.SpansBySamples(ts, progress=False)
+            approx_prior_size = 1000
+            base_priors = tsdate.prior.ConditionalCoalescentTimes(
+                approx_prior_size, Ne, "lognorm", progress=False
+            )
+            base_priors.add(ts.num_samples, True)
+            for total_fixed in span_data.total_fixed_at_0_counts:
+                # For missing data: trees vary in total fixed node count => have different priors
+                if total_fixed > 0:
+                    base_priors.add(total_fixed, True)
+            prior_params = base_priors.get_mixture_prior_params(span_data)
+            from collections import namedtuple
+            PriorParams_base = namedtuple("PriorParams", "alpha, beta, mean, var")
+            class PriorParams(PriorParams_base):
+                @classmethod
+                def field_index(cls, fieldname):
+                    return np.where([f == fieldname for f in cls._fields])[0][0]
+                # np.sqrt(prior_params[:, PriorParams.field_index("beta")])
+            main_param = np.sqrt(prior_params[:, PriorParams.field_index("beta")])
+            datable_nodes = np.ones(ts.num_nodes, dtype=bool)
+            datable_nodes[ts.samples()] = False
+            datable_nodes = np.where(datable_nodes)[0]
+            self.prior_loc = torch.tensor(main_param[datable_nodes])
+            scale_param = np.exp(prior_params[:, PriorParams.field_index("alpha")])
+            self.prior_scale = torch.tensor(scale_param[datable_nodes])
+
+        if False:
+            timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
+            timepoints = timepoints.log1p()
+            prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
+            grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
+            grid_data = grid_data / grid_data.sum(1, True)
+            self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
+            self.prior_loc = self.prior_loc.nan_to_num(1)
+            deltas = (timepoints - self.prior_loc[:, None]) ** 2
+            self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
+            self.prior_scale = self.prior_scale.nan_to_num(1)
         self.leaf_location = leaf_location
 
     def get_mut_edges(self):
@@ -176,7 +212,7 @@ class NaiveModel(BaseModel):
             internal_time = pyro.sample(
                 "internal_time",
                 dist.LogNormal(self.prior_loc, self.prior_scale).mask(
-                    True
+                    True    
                 ),  # False turns off prior but uses it for initialisation
             )  # internal time is modelled in logspace
 
@@ -187,9 +223,12 @@ class NaiveModel(BaseModel):
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
+        dtype = torch.get_default_dtype()
+        time[self.ts.samples()] = torch.tensor(self.ts.tables.nodes.time[self.ts.samples()], dtype=dtype)
         time[..., self.is_internal] = internal_time
         # Should we be Bayesian about migration scale, or should it be fixed?
-        migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+        with pyro.plate("populations", self.num_populations):
+            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 0.1))
 
         # Next add a factor for time gaps between parents and children.
         gap = time[..., self.parent] - time[..., self.child]
@@ -219,8 +258,9 @@ class NaiveModel(BaseModel):
                     ],
                     -2,
                 )
+                migration_scales = torch.index_select(migration_scale, -1, self.population[self.child])
                 self.migration_likelihood(
-                    self.parent, self.child, migration_scale, time, location
+                    self.parent, self.child, migration_scales, time, location
                 )
         return time, gap, location, migration_scale
 
@@ -409,7 +449,8 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale * gap ** 0.5
+    assert migration_radius.shape == gap.shape
 
     # Assume migration folows a bivariate normal distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -430,6 +471,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
         )
     # This is equivalent to
     else:
+        assert parent_location.shape[:-1] + (1,) == migration_radius[..., None].shape
         pyro.sample(
             "migration",
             dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
@@ -526,6 +568,8 @@ def fit_guide(
     ts,
     leaf_location,
     priors,
+    real_locs=None,
+    init_times=None,
     Ne=10000,
     mutation_rate=1e-8,
     migration_scale_init=1,
@@ -560,6 +604,7 @@ def fit_guide(
             prior_init = np.einsum(
                 "t,nt->n", priors.timepoints, (prior_grid_data)
             ) / np.sum(prior_grid_data, axis=1)
+            prior_init = init_times
             internal_time = torch.as_tensor(
                 prior_init, dtype=torch.get_default_dtype()
             )  # / Ne
@@ -571,20 +616,21 @@ def fit_guide(
             return internal_diff
         # GEOGRAPHY.
         if site["name"] == "internal_location":
-            initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
+            initial_guess_loc = model.get_ancestral_geography(ts, leaf_location) #torch.tensor(real_locs[ts.num_samples:])#torch.tensor(real_locs[ts.num_samples:])#
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
         if site["name"] == "migration_scale":
-            return torch.tensor(float(migration_scale_init))
+            return torch.tensor(migration_scale_init, dtype=torch.get_default_dtype())
         raise NotImplementedError("Missing init for {}".format(site["name"]))
 
-    guide = AutoNormal(
+    guide = AutoNormal(#AutoLowRankMultivariateNormal(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
     )  # Mean field (fully Bayesian)
-    optim = pyro.optim.ClippedAdam(
-        {"lr": learning_rate, "lrd": 0.1 ** (1 / max(1, steps))}
-    )
+    #optim = pyro.optim.ClippedAdam(
+    #    {"lr": learning_rate, "lrd": 0.1 ** (1 / max(1, steps))}
+    #)
+    optim = pyro.optim.Adam({"lr": learning_rate})
     svi = SVI(model, guide, optim, Trace_ELBO())
     guide()  # initialises the guide
     losses = []
@@ -598,14 +644,16 @@ def fit_guide(
                     guide.median()
                 )  # assess convergence of migration scale parameter
                 try:
-                    migration_scale = float(median["migration_scale"])
+                    migration_scale = median["migration_scale"]
                     migration_scales.append(migration_scale)
+                    #mse = mean_squared_log_error(ts.tables.nodes.time[ts.num_samples:], median["internal_time"])
                 except KeyError:
                     migration_scale = None
                     print("Migration scale is fixed")
             print(
                 f"step {step} loss = {loss:0.5g}, "
-                f"Migration scale= {migration_scale}"
+                f"Migration scale= {migration_scale}, "
+                #f"MSE = {mse}"
             )
     median = guide.median()
     pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
