@@ -481,10 +481,12 @@ def euclidean_migration(parent, child, migration_scale, time, location):
 
 def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
     lat, long = latlong.unbind(-1)
+    lat = torch.deg2rad(lat)
+    long = torch.deg2rad(long)
     x = lat.cos() * long.cos()
     y = lat.cos() * long.sin()
     z = lat.sin()
-    return torch.cat([x, y, z], dim=-1)
+    return torch.cat([x, y, z]).reshape((len(x), 3))
 
 
 def spherical_migration(parent, child, migration_scale, time, location):
@@ -496,7 +498,7 @@ def spherical_migration(parent, child, migration_scale, time, location):
             migration_likelihood=spherical_migration
         )
     """
-    gap = time[parent] - time[child]  # in units of generations
+    gap = time[..., parent] - time[..., child]  # in units of generations
     gap = gap.clamp(
         min=1
     )  # avoid incorrect ordering of parents/children due to unconstrained
@@ -507,7 +509,7 @@ def spherical_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale * gap ** 0.5
 
     # Assume migration folows a bivariate Laplace distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -517,14 +519,43 @@ def spherical_migration(parent, child, migration_scale, time, location):
     # variational posterior a chance of finding the right mode, we use a
     # log-concave likelihood with tails heavier than Normal but lighter than
     # Stable.  An alternative might be to anneal tail weight.
+
+    # Project lat long to xyz coordinates
     child_xyz = latlong_to_xyz(child_location)
     parent_xyz = latlong_to_xyz(parent_location)
+    # Euclidean distance between child and parent
     distance = torch.linalg.norm(child_xyz - parent_xyz, dim=-1, ord=2)
+    #distance = great_circle_distance(parent_location.unbind(-1), child_location.unbind(-1))
+    #assert parent_xyz.shape == parent_location.shape, (parent_xyz.shape, parent_location.shape, parent_xyz, parent_location)
+    #assert parent_location.shape[:-1] + (1,) == migration_radius[..., None].shape
     pyro.sample(
         "migration",
-        dist.Gamma(2, 1 / migration_radius),
-        obs=distance,
+        dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+        obs=child_location,
     )
+
+    if False:
+        # https://math.stackexchange.com/questions/3725288/infinitesimal-generator-of-the-brownian-motion-on-a-sphere
+        mean_displacement = parent_location + torch.stack([
+            torch.arccos(torch.exp(-gap)),
+            torch.zeros_like(parent_location[..., 0])
+        ], dim=-1)
+        covariance_displacement = torch.stack([
+            torch.ones_like(parent_location[..., 0]),
+            1. / torch.sin(parent_location[..., 0])
+        ], dim=-1)
+
+        pyro.sample(
+            "migration",
+            dist.Normal(mean_displacement, covariance_displacement * migration_radius).to_event(1),
+            obs=child_location,
+        )
+    #distance = distance.clamp(min=1e-6)
+    #pyro.sample(
+    #    "migration",
+    #    dist.Gamma(2, 1 / migration_radius),
+    #    obs=distance,
+    #)
 
 
 class WayPointMigration:
