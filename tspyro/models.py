@@ -526,6 +526,7 @@ def fit_guide(
     ts,
     leaf_location,
     priors,
+    init_loc=None,
     Ne=10000,
     mutation_rate=1e-8,
     migration_scale_init=1,
@@ -535,11 +536,15 @@ def fit_guide(
     location_model=mean_field_location,
     learning_rate=0.005,
     log_every=100,
+    device=None
 ):
     assert isinstance(Model, type)
 
     pyro.set_rng_seed(20210518)
     pyro.clear_param_store()
+
+    if device is None:
+        device = torch.device("cpu")
 
     model = Model(
         ts=ts,
@@ -550,6 +555,7 @@ def fit_guide(
         migration_likelihood=migration_likelihood,
         location_model=location_model,
     )
+    model = model.to(device=device)
 
     def init_loc_fn(site):
         # TIME
@@ -561,7 +567,7 @@ def fit_guide(
                 "t,nt->n", priors.timepoints, (prior_grid_data)
             ) / np.sum(prior_grid_data, axis=1)
             internal_time = torch.as_tensor(
-                prior_init, dtype=torch.get_default_dtype()
+                prior_init, dtype=torch.get_default_dtype(), device=device
             )  # / Ne
             internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
@@ -571,12 +577,15 @@ def fit_guide(
             return internal_diff
         # GEOGRAPHY.
         if site["name"] == "internal_location":
-            initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
+            if init_loc is not None:
+                initial_guess_loc = init_loc
+            else:
+                initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
         if site["name"] == "migration_scale":
-            return torch.tensor(float(migration_scale_init))
+            return torch.tensor(float(migration_scale_init), device=device)
         raise NotImplementedError("Missing init for {}".format(site["name"]))
 
     guide = AutoNormal(
