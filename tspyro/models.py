@@ -142,7 +142,14 @@ class BaseModel(PyroModule):
         central_latitude = np.arctan2(weighted_avg_z, central_square_root)
         return central_latitude, central_longitude
 
-    def get_ancestral_geography(self, ts, sample_locations, method="geographic_mean", device=torch.device("cpu"), show_progress=False):
+    def get_ancestral_geography(
+        self,
+        ts,
+        sample_locations,
+        method="geographic_mean",
+        device=torch.device("cpu"),
+        show_progress=False,
+    ):
         """
         Use dynamic programming to find approximate posterior to sample from
         """
@@ -156,7 +163,9 @@ class BaseModel(PyroModule):
                 parent, val = self.average_edges(parent_edges, locations, method=method)
                 locations[parent] = val
         return torch.tensor(
-            locations[ts.num_samples :], dtype=torch.get_default_dtype(), device=device  # noqa: E203
+            locations[ts.num_samples :],
+            dtype=torch.get_default_dtype(),
+            device=device,  # noqa: E203
         )
 
 
@@ -187,7 +196,9 @@ class NaiveModel(BaseModel):
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
-        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,), device=self.device)
+        time = torch.zeros(
+            internal_time.shape[:-1] + (self.num_nodes,), device=self.device
+        )
         time[..., self.is_internal] = internal_time
         # Should we be Bayesian about migration scale, or should it be fixed?
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
@@ -208,7 +219,7 @@ class NaiveModel(BaseModel):
             )
 
             if self.migration_likelihood is None:
-                location = torch.ones(self.ts.num_nodes)
+                location = torch.ones(self.ts.num_nodes, device=device)
             else:
                 # We need to expand leaf_location because internal_location may
                 # be vectorized over monte carlo samples.
@@ -410,7 +421,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale[..., None] * gap**0.5
 
     # Assume migration folows a bivariate normal distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -466,7 +477,7 @@ def spherical_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale[..., None] * gap**0.5
 
     # Assume migration folows a bivariate Laplace distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -538,7 +549,7 @@ def fit_guide(
     learning_rate=0.005,
     learning_rate_decay=0.1,
     log_every=100,
-    device=None
+    device=None,
 ):
     assert isinstance(Model, type)
 
@@ -556,6 +567,7 @@ def fit_guide(
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
         location_model=location_model,
+        device=device
     )
     model = model.to(device=device)
 
@@ -582,7 +594,9 @@ def fit_guide(
             if init_loc is not None:
                 initial_guess_loc = init_loc
             else:
-                initial_guess_loc = model.get_ancestral_geography(ts, leaf_location, device=device)
+                initial_guess_loc = model.get_ancestral_geography(
+                    ts, leaf_location, device=device
+                )
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
