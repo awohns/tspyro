@@ -254,8 +254,8 @@ def make_hex_grid(
     # Convert waypoints to lat/lon
     longitude = min_lon + (waypoints[:,0].detach().numpy()) * (max_lon-min_lon) / east
     latitude = min_lat + (waypoints[:,1].detach().numpy()) * (max_lat-min_lat) / north
-    waypoints[:,0] = torch.tensor(longitude)
-    waypoints[:,1] = torch.tensor(latitude)
+    waypoints[:,0] = torch.tensor(latitude)
+    waypoints[:,1] = torch.tensor(longitude)
 
     # Construct a transition matrix with a Gaussian kernel.
     #transition = torch.cdist(waypoints, waypoints)
