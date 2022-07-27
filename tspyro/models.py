@@ -509,7 +509,7 @@ class WayPointMigration:
         )
     """
 
-    def __init__(self, transitions, waypoints, waypoint_radius, device=device):
+    def __init__(self, transitions, waypoints, waypoint_radius, device=torch.device("cpu")):
         self.waypoint_radius = waypoint_radius
         self.waypoints = waypoints
         self.device = device
