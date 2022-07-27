@@ -54,7 +54,10 @@ class BaseModel(PyroModule):
         deltas = (timepoints - self.prior_loc[:, None]) ** 2
         self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
         self.prior_scale = self.prior_scale.nan_to_num(1)
-        self.leaf_location = leaf_location.to(device=device)
+        if leaf_location is not None:
+            self.leaf_location = leaf_location.to(device=device)
+        else:
+            self.leaf_location = leaf_location
 
     def get_mut_edges(self):
         """
