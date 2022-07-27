@@ -181,14 +181,15 @@ class WaypointDiffusion2D(TorchDistribution):
         """
         This is really normalized over source, destin pair, but is not normalized
         over destin alone
+        Destin is child location, self.source is parent locaiton
         """
         finfo = torch.finfo(destin.dtype)
-        source_logp = self._waypoint_logp(self.source)
+        source_logp = self._waypoint_logp(self.source) # distance parent to waypoints
         result = source_logp.logsumexp(-1, True)
         source_logp = source_logp - result
         source_prob = source_logp.exp()
-        destin_prob = self.matrix_exp(self.time, source_prob).clamp(min=finfo.tiny)
-        destin_logp = destin_prob.log() + self._waypoint_logp(destin)
+        destin_prob = self.matrix_exp(self.time, source_prob).clamp(min=finfo.tiny) # p dest waypoint | source waypoint.
+        destin_logp = destin_prob.log() + self._waypoint_logp(destin) # log prob of moving to waypoint + the child location is distr normally around destination waypoint
         return result[..., 0] + destin_logp.logsumexp(-1)
 
 
@@ -200,6 +201,10 @@ def make_hex_grid(
     south: float,
     north: float,
     radius: float,
+    min_lat: int,
+    max_lat: int,
+    min_lon: int,
+    max_lon: int,
     predicate=lambda x, y: True,
 ) -> Dict[str, torch.Tensor]:
     """
@@ -211,8 +216,12 @@ def make_hex_grid(
     :param float west:
     :param float east:
     :param float south:
-    :param float north: Bounding box coordinates.
+    :param float north: Bounding box coordinates (in pixel coordinates).
     :param float radius: The distance between neighboring points.
+    :param int min_lat:
+    :param int max_lat:
+    :param int min_lon:
+    :param int max_lon: The lat/lon bounding box of the projection.
     :param callable predicate: Optional feasibility function that inputs
         vectors X and Y of waypoint positions and returns a boolean vector
         describing whether each point is feasible.
@@ -242,10 +251,38 @@ def make_hex_grid(
     if keep is not True:
         waypoints = waypoints[keep]
 
+    # Convert waypoints to lat/lon
+    longitude = min_lon + (waypoints[:,0].detach().numpy()) * (max_lon-min_lon) / east
+    latitude = min_lat + (waypoints[:,1].detach().numpy()) * (max_lat-min_lat) / north
+    waypoints[:,0] = torch.tensor(longitude)
+    waypoints[:,1] = torch.tensor(latitude)
+
     # Construct a transition matrix with a Gaussian kernel.
-    transition = torch.cdist(waypoints, waypoints)
-    transition.pow_(2).mul_(-0.5 / radius ** 2).exp_()
+    #transition = torch.cdist(waypoints, waypoints)
+    from pyproj import Geod
+    g = Geod(ellps='WGS84')
+    import geopy.distance
+    import scipy
+    #swapped_waypoints = torch.stack([waypoints[:,1], waypoints[:,0]],1)#.detach().numpy()
+    
+    transition = torch.tensor(scipy.spatial.distance.cdist(
+        waypoints, waypoints, # Coordinates matrix or tuples list
+           lambda u, v: geopy.distance.geodesic(u, v).kilometers))
+    #transition = torch.zeros((waypoints.shape[0], waypoints.shape[0]))
+    #for index_0, pt1 in enumerate(waypoints):
+    #    for index_1, pt2 in enumerate(waypoints):
+    #        _, _, distance_2d = g.inv(pt1[0], pt1[1], pt2[0], pt2[1])
+    #        transition[index_0, index_1] = distance_2d
+
+    # Convert distances to probabilities
+    # Since we're using a kilometer distance, we need to convert radius from xy to km
+    # pixel distances * degrees/pixel * avg km per degree
+    rescaled_radius = radius * ((max_lon-min_lon)/east) * 110
+    transition.pow_(2).mul_(-0.5 / rescaled_radius ** 2).exp_()
     transition.div_(transition.sum(-1, True))
+
+    #transition = (transition.max(axis=-1).values - transition)
+    #transition /= transition.sum(axis=-1)
 
     return {
         "waypoints": waypoints,
