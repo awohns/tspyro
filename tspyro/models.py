@@ -535,6 +535,7 @@ def fit_guide(
     migration_likelihood=None,
     location_model=mean_field_location,
     learning_rate=0.005,
+    learning_rate_decay=0.1,
     log_every=100,
     device=None
 ):
@@ -592,7 +593,7 @@ def fit_guide(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
     )  # Mean field (fully Bayesian)
     optim = pyro.optim.ClippedAdam(
-        {"lr": learning_rate, "lrd": 0.1 ** (1 / max(1, steps))}
+        {"lr": learning_rate, "lrd": learning_rate_decay ** (1 / max(1, steps))}
     )
     svi = SVI(model, guide, optim, Trace_ELBO())
     guide()  # initialises the guide
