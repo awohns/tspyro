@@ -17,7 +17,7 @@ from tspyro.ops import CummaxUpTree
 
 class BaseModel(PyroModule):
     def __init__(
-        self, ts, *, Ne, prior, leaf_location=None, mutation_rate=1e-8, penalty=100.0
+        self, ts, *, Ne, prior, leaf_location=None, mutation_rate=1e-8, penalty=100.0, device=torch.device("cpu")
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -26,16 +26,17 @@ class BaseModel(PyroModule):
         self.is_internal = ~self.is_leaf
         self.num_nodes = len(self.is_leaf)
         self.num_internal = self.is_internal.sum().item()
+        self.device = device
 
         self.ts = ts
 
-        self.parent = torch.tensor(edges.parent, dtype=torch.long)
-        self.child = torch.tensor(edges.child, dtype=torch.long)
+        self.parent = torch.tensor(edges.parent, dtype=torch.long, device=device)
+        self.child = torch.tensor(edges.child, dtype=torch.long, device=device)
         self.span = torch.tensor(
-            edges.right - edges.left, dtype=torch.get_default_dtype()
+            edges.right - edges.left, dtype=torch.get_default_dtype(), device=device
         )
         self.mutations = torch.tensor(
-            self.get_mut_edges(), dtype=torch.get_default_dtype()
+            self.get_mut_edges(), dtype=torch.get_default_dtype(), device=device
         )  # this is an int, but we optimise with float for pytorch
 
         self.penalty = float(penalty)
@@ -43,10 +44,10 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
+        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype(), device=device)
         timepoints = timepoints.log1p()
         prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
-        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
+        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype(), device=device)
         grid_data = grid_data / grid_data.sum(1, True)
         self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
         self.prior_loc = self.prior_loc.nan_to_num(1)
@@ -173,7 +174,6 @@ class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
-        self.device = kwargs.pop("device", torch.device("cpu"))
         super().__init__(*args, **kwargs)
 
     def forward(self):
