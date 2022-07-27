@@ -156,7 +156,7 @@ class BaseModel(PyroModule):
                 parent, val = self.average_edges(parent_edges, locations, method=method)
                 locations[parent] = val
         return torch.tensor(
-            locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
+            locations[ts.num_samples :], dtype=torch.get_default_dtype(), device=device  # noqa: E203
         )
 
 
@@ -164,6 +164,7 @@ class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
+        self.device = kwargs.pop("device", torch.device("cpu"))
         super().__init__(*args, **kwargs)
 
     def forward(self):
@@ -186,7 +187,7 @@ class NaiveModel(BaseModel):
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
-        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
+        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,), device=self.device)
         time[..., self.is_internal] = internal_time
         # Should we be Bayesian about migration scale, or should it be fixed?
         migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
