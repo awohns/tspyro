@@ -142,7 +142,7 @@ class BaseModel(PyroModule):
         central_latitude = np.arctan2(weighted_avg_z, central_square_root)
         return central_latitude, central_longitude
 
-    def get_ancestral_geography(self, ts, sample_locations, show_progress=False):
+    def get_ancestral_geography(self, ts, sample_locations, method="geographic_mean", show_progress=False):
         """
         Use dynamic programming to find approximate posterior to sample from
         """
@@ -153,7 +153,7 @@ class BaseModel(PyroModule):
         # Iterate through the nodes via groupby on parent node
         for parent_edges in self.edges_by_parent_asc(ts):
             if parent_edges[0] not in fixed_nodes:
-                parent, val = self.average_edges(parent_edges, locations)
+                parent, val = self.average_edges(parent_edges, locations, method=method)
                 locations[parent] = val
         return torch.tensor(
             locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
