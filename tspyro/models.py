@@ -142,7 +142,7 @@ class BaseModel(PyroModule):
         central_latitude = np.arctan2(weighted_avg_z, central_square_root)
         return central_latitude, central_longitude
 
-    def get_ancestral_geography(self, ts, sample_locations, method="geographic_mean", show_progress=False):
+    def get_ancestral_geography(self, ts, sample_locations, method="geographic_mean", device=torch.device("cpu"), show_progress=False):
         """
         Use dynamic programming to find approximate posterior to sample from
         """
@@ -581,7 +581,7 @@ def fit_guide(
             if init_loc is not None:
                 initial_guess_loc = init_loc
             else:
-                initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
+                initial_guess_loc = model.get_ancestral_geography(ts, leaf_location, device=device)
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
