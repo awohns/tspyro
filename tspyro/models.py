@@ -509,9 +509,10 @@ class WayPointMigration:
         )
     """
 
-    def __init__(self, transitions, waypoints, waypoint_radius):
+    def __init__(self, transitions, waypoints, waypoint_radius, device=device):
         self.waypoint_radius = waypoint_radius
         self.waypoints = waypoints
+        self.device = device
         # This cheaply precomputes some matrices.
         self.matrix_exp = ApproximateMatrixExponential(
             transitions, max_time_step=1e6
@@ -529,6 +530,7 @@ class WayPointMigration:
                 radius=self.waypoint_radius,
                 waypoints=self.waypoints,
                 matrix_exp=self.matrix_exp,
+                device=self.device
             ),
             obs=child_location,
         )

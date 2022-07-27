@@ -146,13 +146,14 @@ class WaypointDiffusion2D(TorchDistribution):
         radius: torch.Tensor,
         waypoints: torch.Tensor,
         matrix_exp: ApproximateMatrixExponential,
+        device=torch.device("cpu"),
         *,
         validate_args: Optional[bool] = None,
     ):
         assert source.dim() >= 1
         assert source.size(-1) == 2
-        time = torch.as_tensor(time, dtype=source.dtype)
-        radius = torch.as_tensor(radius, dtype=waypoints.dtype)
+        time = torch.as_tensor(time, dtype=source.dtype, device=device)
+        radius = torch.as_tensor(radius, dtype=waypoints.dtype, device=device)
         assert radius.shape == () or radius.shape == waypoints.shape[:1]
         assert waypoints.dim() == 2
         self.source = source
@@ -160,6 +161,7 @@ class WaypointDiffusion2D(TorchDistribution):
         self.radius = radius
         self.waypoints = waypoints
         self.matrix_exp = matrix_exp
+        self.device = device
         super().__init__(
             batch_shape=source.shape[:-1],
             event_shape=source.shape[-1:],
@@ -206,6 +208,7 @@ def make_hex_grid(
     min_lon: int,
     max_lon: int,
     predicate=lambda x, y: True,
+    device=torch.device("cpu"),
 ) -> Dict[str, torch.Tensor]:
     """
     Creates a dense hex grid of waypoints in the bounding box
@@ -254,8 +257,8 @@ def make_hex_grid(
     # Convert waypoints to lat/lon
     longitude = min_lon + (waypoints[:,0].detach().numpy()) * (max_lon-min_lon) / east
     latitude = min_lat + (waypoints[:,1].detach().numpy()) * (max_lat-min_lat) / north
-    waypoints[:,0] = torch.tensor(latitude)
-    waypoints[:,1] = torch.tensor(longitude)
+    waypoints[:,0] = torch.tensor(latitude, device=device)
+    waypoints[:,1] = torch.tensor(longitude, device=device)
 
     # Construct a transition matrix with a Gaussian kernel.
     #transition = torch.cdist(waypoints, waypoints)
@@ -267,7 +270,7 @@ def make_hex_grid(
     
     transition = torch.tensor(scipy.spatial.distance.cdist(
         waypoints, waypoints, # Coordinates matrix or tuples list
-           lambda u, v: geopy.distance.geodesic(u, v).kilometers))
+           lambda u, v: geopy.distance.geodesic(u, v).kilometers), device=device)
     #transition = torch.zeros((waypoints.shape[0], waypoints.shape[0]))
     #for index_0, pt1 in enumerate(waypoints):
     #    for index_1, pt2 in enumerate(waypoints):
