@@ -281,7 +281,7 @@ def get_mut_edges(ts: tskit.TreeSequence) -> np.ndarray:
 def get_ancestral_geography(
     ts: tskit.TreeSequence,
     sample_locations: np.ndarray,
-    show_progress: typing.Optional[bool] =False
+    show_progress: typing.Optional[bool] = False
 ) -> torch.Tensor:
     """
     Use dynamic programming to find approximate posterior to sample from
