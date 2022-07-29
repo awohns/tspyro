@@ -10,7 +10,8 @@ from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import CummaxUpTree, \
-    edges_by_parent_asc, get_ancestral_geography, get_mut_edges
+    edges_by_parent_asc, get_ancestral_geography, get_mut_edges, \
+    latlong_to_xyz
 
 
 class BaseModel(PyroModule):
@@ -258,29 +259,6 @@ class ReparamLocation:
         return internal_location
 
 
-def great_circle(lon1, lat1, lon2, lat2):
-    lon1 = torch.deg2rad(lon1)
-    lat1 = torch.deg2rad(lat1)
-    lon2 = torch.deg2rad(lon2)
-    lat2 = torch.deg2rad(lat2)
-    return 6371 * (
-        torch.acos(
-            torch.sin(lat1) * torch.sin(lat2)
-            + torch.cos(lat1) * torch.cos(lat2) * torch.cos(lon1 - lon2)
-        )
-    )
-
-
-def great_secant(lon1, lat1, lon2, lat2):
-    lon = torch.deg2rad(torch.stack([lon1, lon2]))
-    lat = torch.deg2rad(torch.stack([lat1, lat2]))
-    x = torch.cos(lat) * torch.cos(lon)
-    y = torch.cos(lat) * torch.sin(lon)
-    z = torch.sin(lat)
-    r2 = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2 + (z[0] - z[1]) ** 2
-    return r2.clamp(min=1e-10).sqrt()
-
-
 def euclidean_migration(parent, child, migration_scale, time, location):
     """
     Example::
@@ -327,14 +305,6 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
             obs=child_location,
         )
-
-
-def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
-    lat, long = latlong.unbind(-1)
-    x = lat.cos() * long.cos()
-    y = lat.cos() * long.sin()
-    z = lat.sin()
-    return torch.cat([x, y, z], dim=-1)
 
 
 def spherical_migration(parent, child, migration_scale, time, location):

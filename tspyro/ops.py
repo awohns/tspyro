@@ -298,3 +298,44 @@ def get_ancestral_geography(
     return torch.tensor(
         locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
     )
+
+
+def great_circle(
+    lon1: torch.Tensor,
+    lat1: torch.Tensor,
+    lon2: torch.Tensor,
+    lat2: torch.Tensor
+) -> torch.Tensor:
+    lon1 = torch.deg2rad(lon1)
+    lat1 = torch.deg2rad(lat1)
+    lon2 = torch.deg2rad(lon2)
+    lat2 = torch.deg2rad(lat2)
+    return 6371 * (
+        torch.acos(
+            torch.sin(lat1) * torch.sin(lat2)
+            + torch.cos(lat1) * torch.cos(lat2) * torch.cos(lon1 - lon2)
+        )
+    )
+
+
+def great_secant(
+    lon1: torch.Tensor,
+    lat1: torch.Tensor,
+    lon2: torch.Tensor,
+    lat2: torch.Tensor
+) -> torch.Tensor:
+    lon = torch.deg2rad(torch.stack([lon1, lon2]))
+    lat = torch.deg2rad(torch.stack([lat1, lat2]))
+    x = torch.cos(lat) * torch.cos(lon)
+    y = torch.cos(lat) * torch.sin(lon)
+    z = torch.sin(lat)
+    r2 = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2 + (z[0] - z[1]) ** 2
+    return torch.sqrt(r2.clamp(min=1e-10))
+
+
+def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
+    lat, long = latlong.unbind(-1)
+    x = lat.cos() * long.cos()
+    y = lat.cos() * long.sin()
+    z = lat.sin()
+    return torch.cat([x, y, z], dim=-1)
