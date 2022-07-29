@@ -1,9 +1,16 @@
+import itertools
 import logging
+import operator
+import typing
+
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 
 import torch
+import tskit
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +20,7 @@ class AccumulateUpTree(ABC):
     Generic semiring programming up a tree.
     """
 
-    def __init__(self, ts):
+    def __init__(self, ts: tskit.TreeSequence):
         super().__init__()
         # Compute rank of each node.
         num_nodes = 1 + max(max(e.child, e.parent) for e in ts.edges())
@@ -92,7 +99,13 @@ class AccumulateUpTree(ABC):
         return result
 
     @abstractmethod
-    def _aggregate_children(self, children, parent, data, dim) -> torch.Tensor:
+    def _aggregate_children(
+        self,
+        child: torch.Tensor,
+        parent: torch.Tensor,
+        data: torch.Tensor,
+        dim: int
+    ) -> torch.Tensor:
         raise NotImplementedError
 
 
@@ -160,3 +173,128 @@ class CumlogsumexpUpTree(AccumulateUpTree):
         )  # [N]
         assert logsumexp_child.shape == data.shape
         return logsumexp_child
+
+
+def radians_center_weighted(
+    x: typing.Sequence[float],
+    y: typing.Sequence[float],
+    z: typing.Sequence[float],
+    weights: np.ndarray
+) -> typing.Tuple[np.ndarray, np.ndarray]:
+    total_weight = np.sum(weights)
+    weighted_avg_x = np.sum(weights * np.array(x)) / total_weight
+    weighted_avg_y = np.sum(weights * np.array(y)) / total_weight
+    weighted_avg_z = np.sum(weights * np.array(z)) / total_weight
+    central_longitude = np.arctan2(weighted_avg_y, weighted_avg_x)
+    central_square_root = np.sqrt(
+        weighted_avg_x * weighted_avg_x + weighted_avg_y * weighted_avg_y
+    )
+    central_latitude = np.arctan2(weighted_avg_z, central_square_root)
+    return central_latitude, central_longitude
+
+
+def weighted_geographic_center(
+    lat_list: typing.List[float],
+    long_list: typing.List[float],
+    weights: typing.Iterable
+) -> typing.Tuple[np.ndarray, np.ndarray]:
+    x = list()
+    y = list()
+    z = list()
+    if len(lat_list) == 1 and len(long_list) == 1:
+        return (np.array(lat_list[0]), np.array(long_list[0]))
+    lat_radians = np.radians(lat_list)
+    long_radians = np.radians(long_list)
+    x = np.cos(lat_radians) * np.cos(long_radians)
+    y = np.cos(lat_radians) * np.sin(long_radians)
+    z = np.sin(lat_radians)
+    weights = np.array(weights)
+    central_latitude, central_longitude = radians_center_weighted(
+        x, y, z, weights
+    )
+    return (np.degrees(central_latitude), np.degrees(central_longitude))
+
+
+def edges_by_parent_asc(
+    ts: tskit.TreeSequence
+) -> typing.Iterable[typing.Tuple[int, typing.Iterable[tskit.Edge]]]:
+    """
+    Return an itertools.groupby object of edges grouped by parent in ascending order
+    of the time of the parent. Since tree sequence properties guarantee that edges
+    are listed in nondecreasing order of parent time
+    (https://tskit.readthedocs.io/en/latest/data-model.html#edge-requirements)
+    we can simply use the standard edge order
+    """
+    return itertools.groupby(ts.edges(), operator.attrgetter("parent"))
+
+
+def average_edges(
+    parent_edges: typing.Tuple[int, typing.Iterable[tskit.Edge]],
+    locations: np.ndarray,
+    method="average"
+) -> typing.Tuple[int, np.ndarray]:
+    parent = parent_edges[0]
+    edges = parent_edges[1]
+
+    child_spanfracs = list()
+    child_lats = list()
+    child_longs = list()
+
+    for edge in edges:
+        child_spanfracs.append(edge.span)
+        child_lats.append(locations[edge.child][0])
+        child_longs.append(locations[edge.child][1])
+    if method == "average":
+        val = np.average(np.array([child_lats, child_longs]).T, axis=0)
+    elif method == "geographic_mean":
+        val = weighted_geographic_center(
+            child_lats, child_longs, np.ones_like(len(child_lats))
+        )
+    return parent, val
+
+
+def get_mut_edges(ts: tskit.TreeSequence) -> np.ndarray:
+    """
+    Get the number of mutations on each edge in the tree sequence.
+    """
+    edge_diff_iter = ts.edge_diffs()
+    right = 0
+    edges_by_child: typing.Dict[int, int] = {}  # contains {child_node:edge_id}
+    mut_edges = np.zeros(ts.num_edges, dtype=np.int64)
+    for site in ts.sites():
+        while right <= site.position:
+            (left, right), edges_out, edges_in = next(edge_diff_iter)
+            for e in edges_out:
+                del edges_by_child[e.child]
+            for e in edges_in:
+                assert e.child not in edges_by_child
+                edges_by_child[e.child] = e.id
+        for m in site.mutations:
+            # In some cases, mutations occur above the root
+            # These don't provide any information for the inside step
+            if m.node in edges_by_child:
+                edge_id = edges_by_child[m.node]
+                mut_edges[edge_id] += 1
+    return mut_edges
+
+
+def get_ancestral_geography(
+    ts: tskit.TreeSequence,
+    sample_locations: np.ndarray,
+    show_progress: typing.Optional[bool] =False
+) -> torch.Tensor:
+    """
+    Use dynamic programming to find approximate posterior to sample from
+    """
+    locations = np.zeros((ts.num_nodes, 2))
+    locations[ts.samples()] = sample_locations
+    fixed_nodes = set(ts.samples())
+
+    # Iterate through the nodes via groupby on parent node
+    for parent_edges in edges_by_parent_asc(ts):
+        if parent_edges[0] not in fixed_nodes:
+            parent, val = average_edges(parent_edges, locations)
+            locations[parent] = val
+    return torch.tensor(
+        locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
+    )
