@@ -1,6 +1,3 @@
-import itertools
-import operator
-
 import numpy as np
 import pyro
 import pyro.distributions as dist
@@ -12,7 +9,9 @@ from pyro.infer.autoguide import AutoNormal
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
-from tspyro.ops import CummaxUpTree
+from tspyro.ops import CummaxUpTree, \
+    edges_by_parent_asc, get_ancestral_geography, get_mut_edges, \
+    latlong_to_xyz
 
 
 class BaseModel(PyroModule):
@@ -35,7 +34,7 @@ class BaseModel(PyroModule):
             edges.right - edges.left, dtype=torch.get_default_dtype()
         )
         self.mutations = torch.tensor(
-            self.get_mut_edges(), dtype=torch.get_default_dtype()
+            get_mut_edges(self.ts), dtype=torch.get_default_dtype()
         )  # this is an int, but we optimise with float for pytorch
 
         self.penalty = float(penalty)
@@ -54,110 +53,6 @@ class BaseModel(PyroModule):
         self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
         self.prior_scale = self.prior_scale.nan_to_num(1)
         self.leaf_location = leaf_location
-
-    def get_mut_edges(self):
-        """
-        Get the number of mutations on each edge in the tree sequence.
-        """
-        ts = self.ts
-        edge_diff_iter = ts.edge_diffs()
-        right = 0
-        edges_by_child = {}  # contains {child_node:edge_id}
-        mut_edges = np.zeros(ts.num_edges, dtype=np.int64)
-        for site in ts.sites():
-            while right <= site.position:
-                (left, right), edges_out, edges_in = next(edge_diff_iter)
-                for e in edges_out:
-                    del edges_by_child[e.child]
-                for e in edges_in:
-                    assert e.child not in edges_by_child
-                    edges_by_child[e.child] = e.id
-            for m in site.mutations:
-                # In some cases, mutations occur above the root
-                # These don't provide any information for the inside step
-                if m.node in edges_by_child:
-                    edge_id = edges_by_child[m.node]
-                    mut_edges[edge_id] += 1
-        return mut_edges
-
-    def weighted_geographic_center(self, lat_list, long_list, weights):
-        x = list()
-        y = list()
-        z = list()
-        if len(lat_list) == 1 and len(long_list) == 1:
-            return (lat_list[0], long_list[0])
-        lat_radians = np.radians(lat_list)
-        long_radians = np.radians(long_list)
-        x = np.cos(lat_radians) * np.cos(long_radians)
-        y = np.cos(lat_radians) * np.sin(long_radians)
-        z = np.sin(lat_radians)
-        weights = np.array(weights)
-        central_latitude, central_longitude = self.radians_center_weighted(
-            x, y, z, weights
-        )
-        return (np.degrees(central_latitude), np.degrees(central_longitude))
-
-    def edges_by_parent_asc(self, ts):
-        """
-        Return an itertools.groupby object of edges grouped by parent in ascending order
-        of the time of the parent. Since tree sequence properties guarantee that edges
-        are listed in nondecreasing order of parent time
-        (https://tskit.readthedocs.io/en/latest/data-model.html#edge-requirements)
-        we can simply use the standard edge order
-        """
-        return itertools.groupby(ts.edges(), operator.attrgetter("parent"))
-
-    def edge_span(self, edge):
-        return edge.right - edge.left
-
-    def average_edges(self, parent_edges, locations, method="average"):
-        parent = parent_edges[0]
-        edges = parent_edges[1]
-
-        child_spanfracs = list()
-        child_lats = list()
-        child_longs = list()
-
-        for edge in edges:
-            child_spanfracs.append(self.edge_span(edge))
-            child_lats.append(locations[edge.child][0])
-            child_longs.append(locations[edge.child][1])
-        if method == "average":
-            val = np.average(np.array([child_lats, child_longs]).T, axis=0)
-        elif method == "geographic_mean":
-            val = self.weighted_geographic_center(
-                child_lats, child_longs, np.ones_like(len(child_lats))
-            )
-        return parent, val
-
-    def radians_center_weighted(self, x, y, z, weights):
-        total_weight = np.sum(weights)
-        weighted_avg_x = np.sum(weights * np.array(x)) / total_weight
-        weighted_avg_y = np.sum(weights * np.array(y)) / total_weight
-        weighted_avg_z = np.sum(weights * np.array(z)) / total_weight
-        central_longitude = np.arctan2(weighted_avg_y, weighted_avg_x)
-        central_square_root = np.sqrt(
-            weighted_avg_x * weighted_avg_x + weighted_avg_y * weighted_avg_y
-        )
-        central_latitude = np.arctan2(weighted_avg_z, central_square_root)
-        return central_latitude, central_longitude
-
-    def get_ancestral_geography(self, ts, sample_locations, show_progress=False):
-        """
-        Use dynamic programming to find approximate posterior to sample from
-        """
-        locations = np.zeros((ts.num_nodes, 2))
-        locations[ts.samples()] = sample_locations
-        fixed_nodes = set(ts.samples())
-
-        # Iterate through the nodes via groupby on parent node
-        for parent_edges in self.edges_by_parent_asc(ts):
-            if parent_edges[0] not in fixed_nodes:
-                parent, val = self.average_edges(parent_edges, locations)
-                locations[parent] = val
-        return torch.tensor(
-            locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
-        )
 
 
 class NaiveModel(BaseModel):
@@ -331,9 +226,7 @@ class ReparamLocation:
             ts.tables.nodes.time, dtype=dtype
         )  # assume times are fixed
 
-        for parent, edges in itertools.groupby(
-            ts.edges(), operator.attrgetter("parent")
-        ):
+        for parent, edges in edges_by_parent_asc(ts):
             children = [e.child for e in edges]
             assert children
             children = torch.tensor(children)
@@ -364,29 +257,6 @@ class ReparamLocation:
         baseline_0, baseline_1 = self.baseline
         internal_location = baseline_0 + baseline_1 @ internal_delta
         return internal_location
-
-
-def great_circle(lon1, lat1, lon2, lat2):
-    lon1 = torch.deg2rad(lon1)
-    lat1 = torch.deg2rad(lat1)
-    lon2 = torch.deg2rad(lon2)
-    lat2 = torch.deg2rad(lat2)
-    return 6371 * (
-        torch.acos(
-            torch.sin(lat1) * torch.sin(lat2)
-            + torch.cos(lat1) * torch.cos(lat2) * torch.cos(lon1 - lon2)
-        )
-    )
-
-
-def great_secant(lon1, lat1, lon2, lat2):
-    lon = torch.deg2rad(torch.stack([lon1, lon2]))
-    lat = torch.deg2rad(torch.stack([lat1, lat2]))
-    x = torch.cos(lat) * torch.cos(lon)
-    y = torch.cos(lat) * torch.sin(lon)
-    z = torch.sin(lat)
-    r2 = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2 + (z[0] - z[1]) ** 2
-    return r2.clamp(min=1e-10).sqrt()
 
 
 def euclidean_migration(parent, child, migration_scale, time, location):
@@ -435,14 +305,6 @@ def euclidean_migration(parent, child, migration_scale, time, location):
             dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
             obs=child_location,
         )
-
-
-def latlong_to_xyz(latlong: torch.Tensor) -> torch.Tensor:
-    lat, long = latlong.unbind(-1)
-    x = lat.cos() * long.cos()
-    y = lat.cos() * long.sin()
-    z = lat.sin()
-    return torch.cat([x, y, z], dim=-1)
 
 
 def spherical_migration(parent, child, migration_scale, time, location):
@@ -581,7 +443,7 @@ def fit_guide(
             if init_loc is not None:
                 initial_guess_loc = init_loc
             else:
-                initial_guess_loc = model.get_ancestral_geography(ts, leaf_location)
+                initial_guess_loc = get_ancestral_geography(ts, leaf_location)
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
