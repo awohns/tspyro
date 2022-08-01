@@ -7,7 +7,7 @@ from . import models
 
 
 def infer_geotime(
-    ts, leaf_location, mutation_rate, priors=None, Ne=10000, steps=1001
+    ts, leaf_location, mutation_rate, priors=None, Ne=10000, steps=1001, migration_scale_init=1, migration_likelihood=None, learning_rate=0.01
 ):
     """
     Takes a tree sequence and infers the time, and optionally the location, of its ancestral haplotypes.
@@ -26,4 +26,4 @@ def infer_geotime(
     """
     if priors is None:
         priors = tsdate.build_prior_grid(ts, Ne=Ne)
-    return models.fit_guide(ts, leaf_location, priors=priors, Ne=Ne, mutation_rate=mutation_rate, steps=steps)
+    return models.fit_guide(ts, leaf_location, priors=priors, Ne=Ne, mutation_rate=mutation_rate, migration_scale_init=migration_scale_init, migration_likelihood=migration_likelihood, steps=steps, learning_rate=learning_rate)

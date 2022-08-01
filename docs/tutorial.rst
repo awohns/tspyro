@@ -52,6 +52,13 @@ This simple simulation is adapted from Recipe 15.1 (A simple 2D continuous-space
 
 You may want to change the path where the tree sequence will be saved.
 
+Let's take a look at the simulated tree sequence.
+
+.. figure:: simulated_times_locations.png
+
+    The simulated tree sequence in space and time.
+
+
 To run ``tspyro``, we first need to load up the tree sequence with `tskit <https://tskit.dev/tskit/docs/stable/introduction.html>`_:
 
 .. code-block:: python
@@ -64,9 +71,7 @@ To run ``tspyro``, we first need to load up the tree sequence with `tskit <https
           ts.num_nodes,
           ts.num_mutations)
 
-The output of this code is:
-
-.. code-block:: python
+The output of this code is::
 
     1000 11 1844 136
 
@@ -84,9 +89,7 @@ The output of this code is:
          sampled_ts.num_nodes,
          sampled_ts.num_mutations)
 
-The output of this code is:
-
-.. code-block:: python
+The output of this code is::
 
     100 5 200 79
 
@@ -98,12 +101,69 @@ Now we want to run ``tspyro`` on this simulated tree sequence. Let's first see a
    inferred_times, inferred_locations, migration_scale, guide, losses = tspyro.infer_geotime(sampled_ts, leaf_location=None, Ne=1000, mutation_rate=1e-7)
 
 
-Let's evaluate the output of the inference... TODO.
+Let's evaluate the output of the inference by plotting the true times vs. the estimated times from ``tspyro``.
+
+.. code-block:: python
+
+    import matplotlib.pyplot as plt
+    plt.scatter(sampled_ts.tables.nodes.time, inferred_times)
+    plt.xlim(1, 1e4)
+    plt.ylim(1, 1e4)
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel("Real times (generations)")
+    plt.ylabel("tspyro estimated times (generations)")
+    plt.plot(plt.xlim(), plt.ylim())
+
+.. figure:: evaluation_nolocation.png
+
+    Accuracy of inferring times in a tree sequence.
+
+Let's calculate the mean squared error to get a quick idea of the accuracy of this inference:
+
+.. code-block:: python
+
+   mse = np.mean([(true_time - est_time) ** 2 for true_time, est_time in zip(sampled_ts.tables.nodes.time, inferred_times)])
+
+The mean squared error is::
+
+    2883788.66
+
+Next, let's infer the locations of ancestral haplotypes jointly with the times. We first need to gather the true locations of nodes in the tree sequence. With this, we can pass the leaf node locations to tspyro.
+
+.. code-block:: python
+
+    node_locations = np.full((sampled_ts.num_nodes, 2), -1, dtype=float)
+    for node in sampled_ts.nodes():
+        if node.individual != -1:
+            node_locations[node.id, :] = sampled_ts.individual(node.individual).location[:2]
+    inferred_times, inferred_locations, migration_scale, guide, losses = tspyro.infer_geotime(sampled_ts, leaf_location=None, Ne=1000, mutation_rate=1e-7)
 
 
-Next, let's infer the locations of ancestral haplotypes jointly with the times.
+Let's evaluate the results:
+
+.. code-block:: python
+
+    fig = plt.figure()
+    ax = fig.add_subplot()
+    ax.set_aspect('equal')
+    ax.scatter(sampled_ts.tables.nodes.time, inferred_times)
+    ax.set_xlim(1, 50000)
+    ax.set_ylim(1, 50000)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.plot(plt.xlim(), plt.ylim())
+    ax.set_xlabel("Real times (generations)")
+    ax.set_ylabel("tspyro estimated times with geography (generations)")
 
 
+.. figure:: evaluation_location.png
 
+   Accuracy of inferring time (jointly with geography) in a tree sequence.
 
+The mean squared error is::
+
+    1382584.02
+
+Clearly, including geography drastically improved our time estimates.
 
