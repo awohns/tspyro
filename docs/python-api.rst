@@ -8,5 +8,5 @@ Python API
 This page provides documentation for the ``tspyro``. 
 
 
-.. autofunction:: tspyro.infer_geotime
+#.. autofunction:: tspyro.infer_geotime
 
