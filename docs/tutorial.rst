@@ -94,7 +94,7 @@ The output of this code is::
     100 5 200 79
 
 
-Now we want to run ``tspyro`` on this simulated tree sequence. Let's first see an example of only inferring the times of the nodes in the tree sequence. ``tspyro.infer_geotime`` is the main function most users will need to run ``tspyro``.
+Now we want to run ``tspyro`` on this simulated tree sequence. Let's first see an example of only inferring the times of the nodes in the tree sequence. ``tspyro.infer_geotime`` is the main function most users will need to run ``tspyro``. We specify ``leaf_location=None`` in order to only run time inference. Since the simulated population size is 500 diploid individuals, we specify an Ne of 1000.
 
 .. code-block:: python
 

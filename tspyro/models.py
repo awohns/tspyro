@@ -526,6 +526,7 @@ def fit_guide(
     ts,
     leaf_location,
     priors,
+    init_times=None,
     init_loc=None,
     Ne=10000,
     mutation_rate=1e-8,
@@ -561,17 +562,20 @@ def fit_guide(
     def init_loc_fn(site):
         # TIME
         if site["name"] == "internal_time":
-            prior_grid_data = priors.grid_data[
-                priors.row_lookup[ts.num_samples :]  # noqa: E203
-            ]
-            prior_init = np.einsum(
-                "t,nt->n", priors.timepoints, (prior_grid_data)
-            ) / np.sum(prior_grid_data, axis=1)
-            internal_time = torch.as_tensor(
-                prior_init, dtype=torch.get_default_dtype(), device=device
-            )  # / Ne
-            internal_time = internal_time.nan_to_num(10)
-            return internal_time.clamp(min=0.1)
+            if init_times is not None:
+                return init_times
+            else:
+                prior_grid_data = priors.grid_data[
+                    priors.row_lookup[ts.num_samples :]  # noqa: E203
+                ]
+                prior_init = np.einsum(
+                    "t,nt->n", priors.timepoints, (prior_grid_data)
+                ) / np.sum(prior_grid_data, axis=1)
+                internal_time = torch.as_tensor(
+                    prior_init, dtype=torch.get_default_dtype(), device=device
+                )  # / Ne
+                internal_time = internal_time.nan_to_num(10)
+                return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
             internal_diff = model.prior_diff_loc.exp()
             internal_diff.sub_(1).clamp_(min=0.1)
@@ -593,7 +597,7 @@ def fit_guide(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
     )  # Mean field (fully Bayesian)
     optim = pyro.optim.ClippedAdam(
-        {"lr": learning_rate, "lrd": learning_rate_decay ** (1 / max(1, steps))}
+        {"lr": learning_rate,} #"lrd": learning_rate_decay ** (1 / max(1, steps))}
     )
     svi = SVI(model, guide, optim, Trace_ELBO())
     guide()  # initialises the guide
