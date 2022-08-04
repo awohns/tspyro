@@ -32,6 +32,8 @@ def fit_guide(
     clip_norm=10.0,
     device=None,
     seed=0,
+    scale_factor=None,
+    num_eval_samples=500,
 ):
     assert isinstance(Model, type)
 
@@ -89,6 +91,13 @@ def fit_guide(
     guide = AutoNormal(
         model, init_scale=0.01, init_loc_fn=init_loc_fn
     )  # Mean field (fully Bayesian)
+    unbound_guide = guide
+
+    if scale_factor == None:
+        scale_factor = 1.0 / ts.num_nodes
+    if scale_factor != 1.0:
+        guide = poutine.scale(guide, scale_factor)
+        model = poutine.scale(model, scale_factor)
 
     if milestones is None:
         optim = ClippedAdam(
@@ -107,12 +116,12 @@ def fit_guide(
     migration_scales = []
 
     for step in range(steps):
-        loss = svi.step() / ts.num_nodes
+        loss = svi.step() / ts.num_nodes if scale_factor == 1.0 else svi.step()
         losses.append(loss)
         if step % log_every == 0 or step == steps - 1:
             with torch.no_grad():
                 median = (
-                    guide.median()
+                    unbound_guide.median()
                 )  # assess convergence of migration scale parameter
                 try:
                     migration_scale = float(median["migration_scale"])
@@ -121,10 +130,13 @@ def fit_guide(
                     migration_scale = None
             print(
                 f"step {step} loss = {loss:0.5g}, "
-                f"Migration scale= {migration_scale}"
+                f"Migration scale = {migration_scale}"
             )
 
-    median = guide.median()
+    final_elbo = np.mean([svi.evaluate_loss() for _ in range(num_eval_samples)])
+    print("final_elbo: {:.4f}".format(final_elbo))
+
+    median = unbound_guide.median()
     pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
 
-    return pyro_time, location, migration_scale, guide, losses
+    return pyro_time, location, migration_scale, unbound_guide, losses
