@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from pyro import poutine
 
+from fit import fit_guide
+
 
 def load_data(args):
     ts = tskit.load(args.ts)
@@ -19,6 +21,7 @@ def load_data(args):
     sampled_ts = ts.simplify(samples=random_sample)
 
     return sampled_ts
+
 
 def get_leaf_locations(ts):
     # Next, we need to get the locations of the nodes
@@ -53,12 +56,16 @@ def main(args):
 
     result = {}
 
-    if args.model == 'time':  # Let's only infer times
-        inferred_times, _, _, guide, losses = tspyro.models.fit_guide(
-            ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every)
+    if args.num_milestones == 0:
+        milestones = None
+    else:
+        milestones = np.linspace(0, args.num_steps, args.num_milestones + 2)[1:-1]
+        print("optim milestones: ", milestones)
 
-        result['inferred_times'] = inferred_times.data.cpu().numpy()
-        result['losses'] = losses
+    if args.model == 'time':  # Let's only infer times
+        inferred_times, _, _, guide, losses = fit_guide(
+            ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed)
 
     elif args.model == 'joint':  # Let's perform joint inference of time and location
         leaf_locations = get_leaf_locations(ts)
@@ -67,20 +74,21 @@ def main(args):
         migration_likelihood = tspyro.models.euclidean_migration
         migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
 
-        inferred_times, inferred_locations, inferred_migration_scale, guide, losses = tspyro.models.fit_guide(
+        inferred_times, inferred_locations, inferred_migration_scale, guide, losses = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
-            priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every)
+            priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed)
 
-        result['inferred_times'] = inferred_times.data.cpu().numpy()
         result['inferred_locations'] = inferred_locations.data.cpu().numpy()
         result['inferred_migration_scale'] = inferred_migration_scale.item()
-        result['losses'] = losses
+
+    result['inferred_times'] = inferred_times.data.cpu().numpy()
+    result['losses'] = losses
+    result['true_times'] = ts.tables.nodes.time
 
     tag = '{}.tcut{}.s{}.Ne{}.numstep{}'.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
-
-    print(inferred_times.shape)
 
 
 if __name__ == "__main__":
@@ -91,6 +99,7 @@ if __name__ == "__main__":
     parser.add_argument('--init-lr', type=float, default=0.005)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--num-milestones', type=int, default=0)
     parser.add_argument('--Ne', type=int, default=1000)
     parser.add_argument('--num-steps', type=int, default=100)
     parser.add_argument('--log-every', type=int, default=1000)
