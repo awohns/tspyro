@@ -77,8 +77,12 @@ class NaiveModel(BaseModel):
         internal_time = internal_time  # * self.Ne
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
         time[..., self.is_internal] = internal_time
+
         # Should we be Bayesian about migration scale, or should it be fixed?
-        migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+        if self.migration_likelihood is not None:
+            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+        else:
+            migration_scale = -1.0
 
         # Next add a factor for time gaps between parents and children.
         gap = time[..., self.parent] - time[..., self.child]

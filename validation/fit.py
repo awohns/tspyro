@@ -29,6 +29,7 @@ def fit_guide(
     learning_rate=0.005,
     learning_rate_decay=0.1,
     log_every=100,
+    clip_norm=10.0,
     device=None,
     seed=0,
 ):
@@ -91,7 +92,7 @@ def fit_guide(
 
     if milestones is None:
         optim = ClippedAdam(
-            {"lr": learning_rate, "lrd": learning_rate_decay ** (1 / max(1, steps))}
+            {"lr": learning_rate, "lrd": learning_rate_decay ** (1 / max(1, steps)), "clip_norm": clip_norm}
         )
     else:
         optim = MultiStepLR({'optimizer': torch.optim.Adam,
@@ -108,7 +109,7 @@ def fit_guide(
     for step in range(steps):
         loss = svi.step() / ts.num_nodes
         losses.append(loss)
-        if step % log_every == 0:
+        if step % log_every == 0 or step == steps - 1:
             with torch.no_grad():
                 median = (
                     guide.median()
@@ -118,7 +119,6 @@ def fit_guide(
                     migration_scales.append(migration_scale)
                 except KeyError:
                     migration_scale = None
-                    print("Migration scale is fixed")
             print(
                 f"step {step} loss = {loss:0.5g}, "
                 f"Migration scale= {migration_scale}"
