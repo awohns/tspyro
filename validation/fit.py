@@ -93,7 +93,7 @@ def fit_guide(
     )  # Mean field (fully Bayesian)
     unbound_guide = guide
 
-    if scale_factor == None:
+    if scale_factor is None:
         scale_factor = 1.0 / ts.num_nodes
     if scale_factor != 1.0:
         guide = poutine.scale(guide, scale_factor)
@@ -119,6 +119,7 @@ def fit_guide(
         loss = svi.step() / ts.num_nodes if scale_factor == 1.0 else svi.step()
         losses.append(loss)
         if step % log_every == 0 or step == steps - 1:
+            loss = np.mean([svi.evaluate_loss() for _ in range(20)])
             with torch.no_grad():
                 median = (
                     unbound_guide.median()
@@ -139,4 +140,4 @@ def fit_guide(
     median = unbound_guide.median()
     pyro_time, gaps, location, migration_scale = poutine.condition(model, median)()
 
-    return pyro_time, location, migration_scale, unbound_guide, losses
+    return pyro_time, location, migration_scale, unbound_guide, losses, final_elbo

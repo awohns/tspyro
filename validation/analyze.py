@@ -42,6 +42,8 @@ def main(args):
     ts_filename = result['ts_filename']
     Ne = result['Ne']
 
+    print("final_elbo: {:.4f}".format(result['final_elbo']))
+
     baselines = compute_baselines(ts_filename, Ne, true_internal_times)
     for k, v in baselines.items():
         print(k + ': {:.4f}'.format(v))

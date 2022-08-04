@@ -67,7 +67,7 @@ def main(args):
         print("optim milestones: ", milestones)
 
     if args.model == 'time':  # Let's only infer times
-        inferred_times, _, _, guide, losses = fit_guide(
+        inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None)
 
@@ -78,7 +78,7 @@ def main(args):
         migration_likelihood = tspyro.models.euclidean_migration
         migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
 
-        inferred_times, inferred_locations, inferred_migration_scale, guide, losses = fit_guide(
+        inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
             priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed)
@@ -97,6 +97,7 @@ def main(args):
     result['Ne'] = args.Ne
     result['time_cutoff'] = args.time_cutoff
     result['ts_filename'] = args.ts
+    result['final_elbo'] = final_elbo
 
     tag = '{}.tcut{}.s{}.Ne{}.numstep{}.milestones{}.lr{}'
     tag = tag.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps,
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=1000)
     parser.add_argument('--num-steps', type=int, default=20000)
-    parser.add_argument('--log-every', type=int, default=1000)
+    parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
     main(args)
