@@ -1,4 +1,5 @@
 import argparse
+import pickle
 
 import tspyro
 import tskit
@@ -48,21 +49,38 @@ def main(args):
     print(args)
 
     ts = load_data(args)
-
-    leaf_locations = get_leaf_locations(ts)
-
-    mask = get_time_mask(ts, args)
-    migration_likelihood = tspyro.models.euclidean_migration
-    migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
-
-    # Let's perform joint inference of time and location
     priors = tsdate.build_prior_grid(ts, Ne=args.Ne)
-    inferred_times_joint, inferred_locations, migration_scale_joint, guide_joint, losses_joint = \
-        tspyro.models.fit_guide(ts, leaf_location=leaf_locations,
-                                migration_likelihood=migration_likelihood,
-                                priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every)
 
-    print(inferred_times_joint.shape)
+    result = {}
+
+    if args.model == 'time':  # Let's only infer times
+        inferred_times, _, _, guide, losses = tspyro.models.fit_guide(
+            ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every)
+
+        result['inferred_times'] = inferred_times.data.cpu().numpy()
+        result['losses'] = losses
+
+    elif args.model == 'joint':  # Let's perform joint inference of time and location
+        leaf_locations = get_leaf_locations(ts)
+
+        mask = get_time_mask(ts, args)
+        migration_likelihood = tspyro.models.euclidean_migration
+        migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
+
+        inferred_times, inferred_locations, inferred_migration_scale, guide, losses = tspyro.models.fit_guide(
+            ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
+            priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every)
+
+        result['inferred_times'] = inferred_times.data.cpu().numpy()
+        result['inferred_locations'] = inferred_locations.data.cpu().numpy()
+        result['inferred_migration_scale'] = inferred_migration_scale.item()
+        result['losses'] = losses
+
+    tag = '{}.tcut{}.s{}.Ne{}.numstep{}'.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps)
+    f = args.out + 'result.{}.pkl'.format(tag)
+    pickle.dump(result, open(f, 'wb'))
+
+    print(inferred_times.shape)
 
 
 if __name__ == "__main__":
