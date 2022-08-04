@@ -11,8 +11,8 @@ from run_val import load_data
 from sklearn.metrics import mean_squared_error, mean_squared_log_error
 
 
-def compute_baselines(ts_filename, Ne, true_times, true_locations=None,
-                      baselines_dir='./baselines'):
+def compute_baselines(ts_filename, Ne, true_internal_times, true_locations=None,
+                      baselines_dir='./baselines/'):
 
     f = baselines_dir + 'baselines.{}.pkl'.format(ts_filename)
     if exists(f):
@@ -21,9 +21,9 @@ def compute_baselines(ts_filename, Ne, true_times, true_locations=None,
     # else compute baseline metrics
     ts = load_data(ts_filename)
 
-    tsdate_times = tsdate.date(ts, mutation_rate=1e-8, Ne=Ne).tables.nodes.time
-    tsdate_time_msle = mean_squared_log_error(tsdate_times, true_times)
-    tsdate_time_male = np.mean(np.abs(np.log(tsdate_times) - np.log(true_times)))
+    tsdate_internal_times = tsdate.date(ts, mutation_rate=1e-8, Ne=Ne).tables.nodes.time[ts.num_samples:]
+    tsdate_time_msle = mean_squared_log_error(tsdate_internal_times, true_internal_times)
+    tsdate_time_male = np.mean(np.abs(np.log(tsdate_internal_times) - np.log(true_internal_times)))
 
     baselines = {'tsdate_time_msle': tsdate_time_msle,
                  'tsdate_time_male': tsdate_time_male}
@@ -36,16 +36,18 @@ def main(args):
     result = pickle.load(open(args.pkl, 'rb'))
 
     inferred_times = result['inferred_times']
+    inferred_internal_times = result['inferred_internal_times']
     true_times = result['true_times']
+    true_internal_times = result['true_internal_times']
     ts_filename = result['ts_filename']
     Ne = result['Ne']
 
-    baselines = compute_baselines(ts_filename, Ne, true_times)
+    baselines = compute_baselines(ts_filename, Ne, true_internal_times)
     for k, v in baselines.items():
         print(k + ': {:.4f}'.format(v))
 
-    pyro_time_msle = mean_squared_log_error(inferred_times, true_times)
-    pyro_time_male = np.mean(np.abs(np.log(inferred_times) - np.log(true_times)))
+    pyro_time_msle = mean_squared_log_error(inferred_internal_times, true_internal_times)
+    pyro_time_male = np.mean(np.abs(np.log(inferred_internal_times) - np.log(true_internal_times)))
 
     print("pyro_time_msle: {:.4f}".format(pyro_time_msle))
     print("pyro_time_male: {:.4f}".format(pyro_time_male))

@@ -90,8 +90,10 @@ def main(args):
         result['true_internal_locations'] = internal_locations
 
     result['inferred_times'] = inferred_times.data.cpu().numpy()
+    result['inferred_internal_times'] = inferred_times.data.cpu().numpy()[ts.num_samples:]
     result['losses'] = losses
     result['true_times'] = ts.tables.nodes.time
+    result['true_internal_times'] = ts.tables.nodes.time[ts.num_samples:]
     result['Ne'] = args.Ne
     result['time_cutoff'] = args.time_cutoff
     result['ts_filename'] = args.ts
