@@ -23,8 +23,10 @@ def compute_baselines(ts_filename, Ne, true_times, true_locations=None,
 
     tsdate_times = tsdate.date(ts, mutation_rate=1e-8, Ne=Ne).tables.nodes.time
     tsdate_time_msle = mean_squared_log_error(tsdate_times, true_times)
+    tsdate_time_male = np.mean(np.abs(np.log(tsdate_times) - np.log(true_times)))
 
-    baselines = {'tsdate_time_msle': tsdate_time_msle}
+    baselines = {'tsdate_time_msle': tsdate_time_msle,
+                 'tsdate_time_male': tsdate_time_male}
     pickle.dump(baselines, open(f, 'wb'))
 
     return baselines
@@ -43,15 +45,20 @@ def main(args):
         print(k + ': {:.4f}'.format(v))
 
     pyro_time_msle = mean_squared_log_error(inferred_times, true_times)
+    pyro_time_male = np.mean(np.abs(np.log(inferred_times) - np.log(true_times)))
 
     print("pyro_time_msle: {:.4f}".format(pyro_time_msle))
+    print("pyro_time_male: {:.4f}".format(pyro_time_male))
 
     if 'inferred_internal_locations' in result:
         inferred_internal_locations = result['inferred_internal_locations']
         true_internal_locations = result['true_internal_locations']
         not_missing = ~np.isnan(true_internal_locations)[:, 0]
         rmse = np.sqrt(mean_squared_error(true_internal_locations[not_missing], inferred_internal_locations[not_missing]))
+        mae = np.power(true_internal_locations[not_missing] - inferred_internal_locations[not_missing], 2).sum(-1)
+        mae = np.sqrt(mae).mean()
         print("pyro_spatial_rmse: {:.4f}".format(rmse))
+        print("pyro_spatial_mae: {:.4f}".format(mae))
 
 
 if __name__ == "__main__":
