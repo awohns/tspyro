@@ -99,8 +99,8 @@ def main(args):
     result['ts_filename'] = args.ts
     result['final_elbo'] = final_elbo
 
-    tag = '{}.tcut{}.s{}.Ne{}.numstep{}.milestones{}.lr{}'
-    tag = tag.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps,
+    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}.lr{}'
+    tag = tag.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
                      args.num_milestones, int(1000 * args.init_lr))
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=20000)
+    parser.add_argument('--num-steps', type=int, default=30000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
