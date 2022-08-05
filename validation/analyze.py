@@ -9,12 +9,25 @@ import numpy as np
 from run_val import load_data
 
 from sklearn.metrics import mean_squared_error, mean_squared_log_error
+from scipy.stats import pearsonr, spearmanr
 
 
 def compute_time_metrics(true_internal_times, inferred_internal_times):
     result = {}
     result['time_msle'] = mean_squared_log_error(inferred_internal_times, true_internal_times)
     result['time_male'] = np.mean(np.abs(np.log(inferred_internal_times) - np.log(true_internal_times)))
+    result['time_log_bias'] = np.mean(np.log(inferred_internal_times) - np.log(true_internal_times))
+    result['time_pearson'] = pearsonr(inferred_internal_times, true_internal_times)[0]
+    result['time_spearman'] = spearmanr(inferred_internal_times, true_internal_times)[0]
+
+    median_time = np.median(true_internal_times)
+    early, late = true_internal_times <= median_time, true_internal_times >= median_time
+    result['time_msle_late'] = mean_squared_log_error(inferred_internal_times[late], true_internal_times[late])
+    result['time_msle_early'] = mean_squared_log_error(inferred_internal_times[early], true_internal_times[early])
+    result['time_male_late'] = np.mean(np.abs(np.log(inferred_internal_times[late]) - np.log(true_internal_times[late])))
+    result['time_male_early'] = np.mean(np.abs(np.log(inferred_internal_times[early]) - np.log(true_internal_times[early])))
+    result['time_log_bias_late'] = np.mean(np.log(inferred_internal_times[late]) - np.log(true_internal_times[late]))
+    result['time_log_bias_early'] = np.mean(np.log(inferred_internal_times[early]) - np.log(true_internal_times[early]))
     return result
 
 
