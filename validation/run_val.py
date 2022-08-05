@@ -62,7 +62,8 @@ def main(args):
     if args.model == 'time':  # Let's only infer times
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
-            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None)
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
+            gamma=args.gamma)
 
     elif args.model == 'joint':  # Let's perform joint inference of time and location
         leaf_locations, internal_locations = get_leaf_locations(ts)
@@ -74,7 +75,7 @@ def main(args):
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
             priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
-            learning_rate=args.init_lr, milestones=milestones, seed=args.seed)
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma)
 
         inferred_internal_locations = inferred_locations[ts.num_samples:]
 
@@ -97,24 +98,25 @@ def main(args):
     if 'inferred_internal_locations' in result:
         assert result['inferred_internal_locations'].shape == result['inferred_internal_locations'].shape
 
-    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}.lr{}'
+    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}.lr{}.{}'
     tag = tag.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
-                     args.num_milestones, int(1000 * args.init_lr))
+                     args.num_milestones, int(1000 * args.init_lr), args.ts)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_200_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_500_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--model', type=str, default='time', choices=['time', 'space', 'joint'])
     parser.add_argument('--init-lr', type=float, default=0.05)
-    parser.add_argument('--time-cutoff', type=float, default=200.0)
+    parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=3000)
+    parser.add_argument('--num-steps', type=int, default=40000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
