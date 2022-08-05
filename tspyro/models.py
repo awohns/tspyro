@@ -2,6 +2,8 @@ import numpy as np
 import pyro
 import pyro.distributions as dist
 import torch
+import tsdate
+import scipy
 from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
@@ -9,14 +11,25 @@ from pyro.infer.autoguide import AutoNormal
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
-from tspyro.ops import CummaxUpTree, \
-    edges_by_parent_asc, get_ancestral_geography, get_mut_edges, \
-    latlong_to_xyz
+from tspyro.ops import (
+    CummaxUpTree,
+    edges_by_parent_asc,
+    get_ancestral_geography,
+    get_mut_edges,
+    latlong_to_xyz,
+)
 
 
 class BaseModel(PyroModule):
     def __init__(
-        self, ts, *, Ne, prior, leaf_location=None, mutation_rate=1e-8, penalty=100.0
+        self,
+        ts,
+        *,
+        Ne,
+        leaf_location=None,
+        mutation_rate=1e-8,
+        penalty=100.0,
+        progress=False,
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -42,16 +55,31 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
-        timepoints = timepoints.log1p()
-        prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
-        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
-        grid_data = grid_data / grid_data.sum(1, True)
-        self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
-        self.prior_loc = self.prior_loc.nan_to_num(1)
-        deltas = (timepoints - self.prior_loc[:, None]) ** 2
-        self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
-        self.prior_scale = self.prior_scale.nan_to_num(1)
+        span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
+        approximate_prior_size = 1000
+        prior_distribution = "lognorm"
+        base_priors = tsdate.prior.ConditionalCoalescentTimes(
+            approximate_prior_size, self.Ne, prior_distribution, progress=progress
+        )
+        base_priors.add(ts.num_samples, True)
+
+        for total_fixed in span_data.total_fixed_at_0_counts:
+            # For missing data: trees vary in total fixed node count => have different priors
+            if total_fixed > 0:
+                base_priors.add(total_fixed, True)
+
+        prior_params = base_priors.get_mixture_prior_params(span_data)
+        self.prior_scale = torch.exp(
+            torch.tensor(
+                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+            )
+        )
+        self.prior_loc = torch.sqrt(
+            torch.tensor(
+                prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
+            )
+        )
+
         self.leaf_location = leaf_location
 
 
@@ -279,7 +307,7 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale[..., None] * gap**0.5
 
     # Assume migration folows a bivariate normal distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -327,7 +355,7 @@ def spherical_migration(parent, child, migration_scale, time, location):
     child_location = location.index_select(-2, child)
     # Note we need to .unsqueeze(-1) i.e. [..., None] the migration_scale
     # in case you want to draw multiple samples.
-    migration_radius = migration_scale[..., None] * gap ** 0.5
+    migration_radius = migration_scale[..., None] * gap**0.5
 
     # Assume migration folows a bivariate Laplace distribution, so that
     # distance follows a Gamma(2,-) distribution.  While a more theoretically
@@ -387,7 +415,6 @@ class WayPointMigration:
 def fit_guide(
     ts,
     leaf_location,
-    priors,
     init_loc=None,
     Ne=10000,
     mutation_rate=1e-8,
@@ -399,7 +426,7 @@ def fit_guide(
     learning_rate=0.005,
     learning_rate_decay=0.1,
     log_every=100,
-    device=None
+    device=None,
 ):
     assert isinstance(Model, type)
 
@@ -412,7 +439,6 @@ def fit_guide(
     model = Model(
         ts=ts,
         leaf_location=leaf_location,
-        prior=priors,
         Ne=Ne,
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
@@ -423,12 +449,9 @@ def fit_guide(
     def init_loc_fn(site):
         # TIME
         if site["name"] == "internal_time":
-            prior_grid_data = priors.grid_data[
-                priors.row_lookup[ts.num_samples :]  # noqa: E203
-            ]
-            prior_init = np.einsum(
-                "t,nt->n", priors.timepoints, (prior_grid_data)
-            ) / np.sum(prior_grid_data, axis=1)
+            prior_init = scipy.stats.lognorm.mean(
+                model.prior_loc, scale=model.prior_scale
+            )
             internal_time = torch.as_tensor(
                 prior_init, dtype=torch.get_default_dtype(), device=device
             )  # / Ne
