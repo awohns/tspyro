@@ -20,23 +20,16 @@ def load_data(filename):
 
 def get_leaf_locations(ts):
     # Next, we need to get the locations of the nodes
-    node_locations = np.full((ts.num_nodes, 2), -1, dtype=float)
-    no_location_nodes = []
-    for node in ts.nodes():
-        if node.individual != -1:
-            node_locations[node.id, :] = ts.individual(node.individual).location[:2]
-        else:
-            no_location_nodes.append(node.id)
-    # We want a tensor with only the leaf nodes for inference
-    leaf_locations = torch.from_numpy(node_locations[ts.samples()])
-
     locations = []
     for node in ts.nodes():
         if node.individual != -1:
             locations.append(ts.individual(node.individual).location[:2])
         else:
             locations.append(np.array([np.nan, np.nan]))
-    internal_locations = np.array(locations)[ts.num_samples:, ]
+
+    locations = np.array(locations)
+    internal_locations = locations[ts.num_samples:]
+    leaf_locations = torch.from_numpy(locations[:ts.num_samples])
 
     return leaf_locations, internal_locations
 
@@ -98,6 +91,11 @@ def main(args):
     result['time_cutoff'] = args.time_cutoff
     result['ts_filename'] = args.ts
     result['final_elbo'] = final_elbo
+    result['model'] = args.model
+
+    assert result['true_times'].shape == result['inferred_times'].shape
+    if 'inferred_internal_locations' in result:
+        assert result['inferred_internal_locations'].shape == result['inferred_internal_locations'].shape
 
     tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}.lr{}'
     tag = tag.format(args.model, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
@@ -108,15 +106,15 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_999_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_200_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--model', type=str, default='time', choices=['time', 'space', 'joint'])
     parser.add_argument('--init-lr', type=float, default=0.05)
-    parser.add_argument('--time-cutoff', type=float, default=100.0)
+    parser.add_argument('--time-cutoff', type=float, default=200.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=30000)
+    parser.add_argument('--num-steps', type=int, default=3000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 

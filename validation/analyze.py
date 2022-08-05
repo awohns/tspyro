@@ -11,6 +11,24 @@ from run_val import load_data
 from sklearn.metrics import mean_squared_error, mean_squared_log_error
 
 
+def compute_time_metrics(true_internal_times, inferred_internal_times):
+    result = {}
+    result['time_msle'] = mean_squared_log_error(inferred_internal_times, true_internal_times)
+    result['time_male'] = np.mean(np.abs(np.log(inferred_internal_times) - np.log(true_internal_times)))
+    return result
+
+
+def compute_sptial_metrics(true_internal_locs, inferred_internal_locs):
+    result = {}
+    not_missing = ~np.isnan(true_internal_locs)[:, 0]
+    rmse = np.sqrt(mean_squared_error(true_internal_locs[not_missing], inferred_internal_locs[not_missing]))
+    mae = np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1)
+    mae = np.sqrt(mae).mean()
+    result['spatial_rmse'] = rmse
+    result['spatial_mae'] = mae
+    return result
+
+
 def compute_baselines(ts_filename, Ne, true_internal_times, true_locations=None,
                       baselines_dir='./baselines/'):
 
@@ -22,22 +40,17 @@ def compute_baselines(ts_filename, Ne, true_internal_times, true_locations=None,
     ts = load_data(ts_filename)
 
     tsdate_internal_times = tsdate.date(ts, mutation_rate=1e-8, Ne=Ne).tables.nodes.time[ts.num_samples:]
-    tsdate_time_msle = mean_squared_log_error(tsdate_internal_times, true_internal_times)
-    tsdate_time_male = np.mean(np.abs(np.log(tsdate_internal_times) - np.log(true_internal_times)))
+    time_metrics = compute_time_metrics(true_internal_times, tsdate_internal_times)
 
-    baselines = {'tsdate_time_msle': tsdate_time_msle,
-                 'tsdate_time_male': tsdate_time_male}
-    pickle.dump(baselines, open(f, 'wb'))
+    pickle.dump(time_metrics, open(f, 'wb'))
 
-    return baselines
+    return time_metrics
 
 
 def main(args):
     result = pickle.load(open(args.pkl, 'rb'))
 
-    inferred_times = result['inferred_times']
     inferred_internal_times = result['inferred_internal_times']
-    true_times = result['true_times']
     true_internal_times = result['true_internal_times']
     ts_filename = result['ts_filename']
     Ne = result['Ne']
@@ -46,23 +59,18 @@ def main(args):
 
     baselines = compute_baselines(ts_filename, Ne, true_internal_times)
     for k, v in baselines.items():
-        print(k + ': {:.4f}'.format(v))
+        print('[tsdate] ' + k + ': {:.4f}'.format(v))
 
-    pyro_time_msle = mean_squared_log_error(inferred_internal_times, true_internal_times)
-    pyro_time_male = np.mean(np.abs(np.log(inferred_internal_times) - np.log(true_internal_times)))
-
-    print("pyro_time_msle: {:.4f}".format(pyro_time_msle))
-    print("pyro_time_male: {:.4f}".format(pyro_time_male))
+    pyro_metrics = {}
+    pyro_metrics.update(compute_time_metrics(true_internal_times, inferred_internal_times))
 
     if 'inferred_internal_locations' in result:
-        inferred_internal_locations = result['inferred_internal_locations']
-        true_internal_locations = result['true_internal_locations']
-        not_missing = ~np.isnan(true_internal_locations)[:, 0]
-        rmse = np.sqrt(mean_squared_error(true_internal_locations[not_missing], inferred_internal_locations[not_missing]))
-        mae = np.power(true_internal_locations[not_missing] - inferred_internal_locations[not_missing], 2).sum(-1)
-        mae = np.sqrt(mae).mean()
-        print("pyro_spatial_rmse: {:.4f}".format(rmse))
-        print("pyro_spatial_mae: {:.4f}".format(mae))
+        inferred_internal_locs = result['inferred_internal_locations']
+        true_internal_locs = result['true_internal_locations']
+        pyro_metrics.update(compute_sptial_metrics(true_internal_locs, inferred_internal_locs))
+
+    for k, v in pyro_metrics.items():
+        print('[pyro-{}] '.format(result['model']) + k + ': {:.4f}'.format(v))
 
 
 if __name__ == "__main__":
