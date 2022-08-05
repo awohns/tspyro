@@ -1,4 +1,3 @@
-import numpy as np
 import pyro
 import pyro.distributions as dist
 import torch
@@ -64,7 +63,8 @@ class BaseModel(PyroModule):
         base_priors.add(ts.num_samples, True)
 
         for total_fixed in span_data.total_fixed_at_0_counts:
-            # For missing data: trees vary in total fixed node count => have different priors
+            # For missing data: trees vary in total fixed node count => have
+            # different priors
             if total_fixed > 0:
                 base_priors.add(total_fixed, True)
 
