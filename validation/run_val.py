@@ -1,7 +1,6 @@
 import argparse
 import pickle
 
-import tspyro
 import tskit
 import tsdate
 
@@ -10,6 +9,7 @@ import torch
 from pyro import poutine
 
 from fit import fit_guide
+from models import euclidean_migration
 
 
 def load_data(filename):
@@ -69,8 +69,7 @@ def main(args):
         leaf_locations, internal_locations = get_leaf_locations(ts)
 
         mask = get_time_mask(ts, args)
-        migration_likelihood = tspyro.models.euclidean_migration
-        migration_likelihood = poutine.mask(migration_likelihood, mask=mask)
+        migration_likelihood = poutine.mask(euclidean_migration, mask=mask)
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
