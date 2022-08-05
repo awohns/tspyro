@@ -31,14 +31,25 @@ def compute_time_metrics(true_internal_times, inferred_internal_times):
     return result
 
 
-def compute_sptial_metrics(true_internal_locs, inferred_internal_locs):
+def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_internal_times):
     result = {}
     not_missing = ~np.isnan(true_internal_locs)[:, 0]
     rmse = np.sqrt(mean_squared_error(true_internal_locs[not_missing], inferred_internal_locs[not_missing]))
-    mae = np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1)
-    mae = np.sqrt(mae).mean()
+    mae = np.sqrt(np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1)).mean()
     result['spatial_rmse'] = rmse
     result['spatial_mae'] = mae
+
+    median_time = np.median(true_internal_times)
+    early, late = true_internal_times <= median_time, true_internal_times >= median_time
+    early, late = early & not_missing, late & not_missing
+    rmse_late = np.sqrt(mean_squared_error(true_internal_locs[late], inferred_internal_locs[late]))
+    rmse_early = np.sqrt(mean_squared_error(true_internal_locs[early], inferred_internal_locs[early]))
+    mae_late = np.sqrt(np.power(true_internal_locs[late] - inferred_internal_locs[late], 2).sum(-1)).mean()
+    mae_early = np.sqrt(np.power(true_internal_locs[early] - inferred_internal_locs[early], 2).sum(-1)).mean()
+    result['spatial_rmse_late'] = rmse_late
+    result['spatial_rmse_early'] = rmse_early
+    result['spatial_mae_late'] = mae_late
+    result['spatial_mae_early'] = mae_early
     return result
 
 
@@ -80,7 +91,7 @@ def main(args):
     if 'inferred_internal_locations' in result:
         inferred_internal_locs = result['inferred_internal_locations']
         true_internal_locs = result['true_internal_locations']
-        pyro_metrics.update(compute_sptial_metrics(true_internal_locs, inferred_internal_locs))
+        pyro_metrics.update(compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_internal_times))
 
     for k, v in pyro_metrics.items():
         print('[pyro-{}] '.format(result['model']) + k + ': {:.4f}'.format(v))
