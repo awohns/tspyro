@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
     parser.add_argument('--time', type=str, default='naive', choices=['naive'])
-    parser.add_argument('--time-init', type=str, default='tsdate', choices=['prior', 'tsdate', 'truth'])
+    parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)

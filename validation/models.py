@@ -140,8 +140,8 @@ class NaiveModel(BaseModel):
                 migration_scale = self.migration_likelihood(
                     self.parent, self.child, migration_scale, time, location
                 )
-                if self.migration_likelihood.__name__ == 'marginal_likelihood':
-                    pyro.deterministic('migration_scale', migration_scale)
+                if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
+                    pyro.get_param_store()['migration_scale'] = migration_scale.data
 
         return time, gap, location, migration_scale
 

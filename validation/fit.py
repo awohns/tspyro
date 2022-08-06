@@ -124,7 +124,10 @@ def fit_guide(
                     migration_scale = float(median["migration_scale"])
                     migration_scales.append(migration_scale)
                 except KeyError:
-                    migration_scale = None
+                    try:
+                        migration_scale = pyro.param("migration_scale").item()
+                    except:
+                        migration_scale = None
             time_conv_diagnostic = torch.abs(last_internal_log_time - median['internal_time'].log()).mean().item()
             last_internal_log_time = median['internal_time'].log().clone()
             print(
