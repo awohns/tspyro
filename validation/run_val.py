@@ -60,9 +60,9 @@ def main(args):
 
     if args.model == 'time':  # Let's only infer times
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
-            ts, leaf_location=None, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            ts, leaf_location=None, Ne=args.Ne, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma, Ne=args.Ne)
+            gamma=args.gamma)
 
     elif args.model == 'joint':  # Let's perform joint inference of time and location
         leaf_locations, internal_locations = get_leaf_locations(ts)
