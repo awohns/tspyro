@@ -14,7 +14,6 @@ from models import NaiveModel, mean_field_location
 def fit_guide(
     ts,
     leaf_location,
-    priors,
     init_times=None,
     init_loc=None,
     Ne=10000,
@@ -46,7 +45,6 @@ def fit_guide(
     model = Model(
         ts=ts,
         leaf_location=leaf_location,
-        prior=priors,
         Ne=Ne,
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
@@ -60,15 +58,7 @@ def fit_guide(
             if init_times is not None:
                 internal_time = init_times
             else:
-                prior_grid_data = priors.grid_data[
-                    priors.row_lookup[ts.num_samples :]  # noqa: E203
-                ]
-                prior_init = np.einsum(
-                    "t,nt->n", priors.timepoints, (prior_grid_data)
-                ) / np.sum(prior_grid_data, axis=1)
-                internal_time = torch.as_tensor(
-                    prior_init, dtype=torch.get_default_dtype(), device=device
-                )  # / Ne
+                internal_time = dist.LogNormal(model.prior_loc, model.prior_scale).mean.to(device=device)
                 internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":

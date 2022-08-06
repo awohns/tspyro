@@ -69,16 +69,14 @@ class BaseModel(PyroModule):
                 base_priors.add(total_fixed, True)
 
         prior_params = base_priors.get_mixture_prior_params(span_data)
-        self.prior_scale = torch.exp(
-            torch.tensor(
-                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
-            )
-        )
-        self.prior_loc = torch.sqrt(
+        self.prior_scale = torch.sqrt(
             torch.tensor(
                 prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
             )
         )
+        self.prior_loc = torch.tensor(
+                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+            )
 
         self.leaf_location = leaf_location
 
@@ -415,7 +413,6 @@ class WayPointMigration:
 def fit_guide(
     ts,
     leaf_location,
-    priors,
     init_times=None,
     init_loc=None,
     Ne=10000,
@@ -454,12 +451,7 @@ def fit_guide(
             if init_times is not None:
                 internal_time = init_times 
             else:
-                prior_init = scipy.stats.lognorm.mean(
-                    model.prior_loc, scale=model.prior_scale
-                )
-                internal_time = torch.as_tensor(
-                    prior_init, dtype=torch.get_default_dtype(), device=device
-                )  # / Ne
+                internal_time = dist.LogNormal(model.prior_loc, model.prior_scale).mean.to(device=device)
                 internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
