@@ -49,7 +49,6 @@ def main(args):
     print(args)
 
     ts = load_data(args.ts)
-    priors = tsdate.build_prior_grid(ts, Ne=args.Ne)
 
     result = {}
 
@@ -61,7 +60,7 @@ def main(args):
 
     if args.model == 'time':  # Let's only infer times
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
-            ts, leaf_location=None, priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            ts, leaf_location=None, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
             gamma=args.gamma)
 
@@ -73,7 +72,7 @@ def main(args):
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
-            priors=priors, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma)
 
         inferred_internal_locations = inferred_locations[ts.num_samples:]
