@@ -80,9 +80,10 @@ class NaiveModel(BaseModel):
 
         # Should we be Bayesian about migration scale, or should it be fixed?
         if self.migration_likelihood is not None:
-            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+            #migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+            migration_scale = torch.tensor(-1.0)
         else:
-            migration_scale = -1.0
+            migration_scale = torch.tensor(-1.0)
 
         # Next add a factor for time gaps between parents and children.
         gap = time[..., self.parent] - time[..., self.child]
@@ -255,6 +256,28 @@ class ReparamLocation:
         baseline_0, baseline_1 = self.baseline
         internal_location = baseline_0 + baseline_1 @ internal_delta
         return internal_location
+
+
+def marginal_euclidean_migration(parent, child, migration_scale, time, location):
+    """
+    """
+    gap = time[..., parent] - time[..., child]  # in units of generations
+    gap = gap.clamp(
+        min=1
+    )  # avoid incorrect ordering of parents/children due to unconstrained
+    parent_location = location.index_select(-2, parent)
+    child_location = location.index_select(-2, child)
+    delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)
+    migration_radius = (delta_loc_sq / gap).mean().sqrt()
+
+    if torch.rand(1).item() < 0.001:
+        print("migration_radius",migration_radius.item())
+
+    pyro.sample(
+        "migration",
+        dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+        obs=child_location,
+    )
 
 
 def euclidean_migration(parent, child, migration_scale, time, location):

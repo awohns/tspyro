@@ -9,7 +9,7 @@ import torch
 from pyro import poutine
 
 from fit import fit_guide
-from models import euclidean_migration
+from models import euclidean_migration, marginal_euclidean_migration
 
 
 def load_data(filename):
@@ -69,7 +69,7 @@ def main(args):
         leaf_locations, internal_locations = get_leaf_locations(ts)
 
         mask = get_time_mask(ts, args)
-        migration_likelihood = poutine.mask(euclidean_migration, mask=mask)
+        migration_likelihood = poutine.mask(marginal_euclidean_migration, mask=mask)
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
@@ -106,16 +106,16 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_500_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_999_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--model', type=str, default='time', choices=['time', 'space', 'joint'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.1)
-    parser.add_argument('--num-milestones', type=int, default=3)
+    parser.add_argument('--gamma', type=float, default=0.2)
+    parser.add_argument('--num-milestones', type=int, default=4)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=40000)
+    parser.add_argument('--num-steps', type=int, default=50000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
