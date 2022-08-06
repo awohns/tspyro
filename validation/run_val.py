@@ -9,6 +9,7 @@ from pyro import poutine
 
 from fit import fit_guide
 from models import euclidean_migration, marginal_euclidean_migration
+from analyze import compute_baselines
 
 
 def load_data(filename):
@@ -58,12 +59,23 @@ def main(args):
 
     locations, is_leaf, is_internal, time_mask = get_metadata(ts, args)
 
+    if args.time_init == 'prior':
+        init_times = None
+    elif args.time_init == 'tsdate':
+        init_times = compute_baselines(args.ts, Ne=args.Ne,
+                                       true_internal_times=ts.tables.nodes.time[is_internal],
+                                       is_internal=is_internal)['tsdate_times'][is_internal]
+        init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype())
+    elif args.time_init == 'truth':
+        init_times = ts.tables.nodes.time[is_internal]
+        init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype())
+
     # Let's only infer times
     if args.migration == 'none':
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, Ne=args.Ne, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma)
+            gamma=args.gamma, init_times=init_times)
 
     # Let's perform joint inference of time and location
     elif args.migration in ['euclidean', 'marginal_euclidean']:
@@ -74,7 +86,8 @@ def main(args):
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
             mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
-            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma)
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
+            init_times=init_times)
 
         inferred_internal_locations = inferred_locations[is_internal]
 
@@ -92,31 +105,35 @@ def main(args):
     result['ts_filename'] = args.ts
     result['final_elbo'] = final_elbo
     result['migration'] = args.migration
+    result['is_leaf'] = is_leaf
+    result['is_internal'] = is_internal
 
     assert result['true_times'].shape == result['inferred_times'].shape
     if 'inferred_internal_locations' in result:
         assert result['inferred_internal_locations'].shape == result['inferred_internal_locations'].shape
 
-    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}.lr{}.{}'
+    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.{}'
     tag = tag.format(args.migration, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
-                     args.num_milestones, int(1000 * args.init_lr), args.ts)
+                     args.num_milestones, int(10 * args.gamma), args.time_init, int(1000 * args.init_lr), args.ts)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_200_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_500_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
+    parser.add_argument('--time', type=str, default='naive', choices=['naive'])
+    parser.add_argument('--time-init', type=str, default='tsdate', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--num-milestones', type=int, default=2)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=300)
+    parser.add_argument('--num-steps', type=int, default=30000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
