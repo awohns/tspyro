@@ -64,16 +64,14 @@ class BaseModel(PyroModule):
                 base_priors.add(total_fixed, True)
 
         prior_params = base_priors.get_mixture_prior_params(span_data)
-        self.prior_scale = torch.exp(
-            torch.tensor(
-                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
-            )
-        )
-        self.prior_loc = torch.sqrt(
+        self.prior_scale = torch.sqrt(
             torch.tensor(
                 prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
             )
         )
+        self.prior_loc = torch.tensor(
+                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+            )
 
         self.leaf_location = leaf_location
 

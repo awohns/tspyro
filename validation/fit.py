@@ -1,6 +1,7 @@
 import numpy as np
 import pyro
 import torch
+import pyro.distributions as dist
 from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
@@ -63,7 +64,7 @@ def fit_guide(
             if init_times is not None:
                 internal_time = init_times
             else:
-                internal_time = dist.LogNormal(model.prior_loc, model.prior_scale).mean.to(device=device)
+                internal_time = dist.LogNormal(prior_loc, prior_scale).mean.to(device=device)
                 internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
