@@ -60,7 +60,7 @@ def main(args):
 
     if args.model == 'time':  # Let's only infer times
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
-            ts, leaf_location=None, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            ts, leaf_location=None, Ne=args.Ne, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
             gamma=args.gamma)
 
@@ -71,7 +71,7 @@ def main(args):
         migration_likelihood = poutine.mask(marginal_euclidean_migration, mask=mask)
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
-            ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
+            ts, leaf_location=leaf_locations, Ne=args.Ne, migration_likelihood=migration_likelihood,
             mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma)
 
