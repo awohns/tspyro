@@ -15,7 +15,6 @@ from models import NaiveModel, mean_field_location
 def fit_guide(
     ts,
     leaf_location,
-    priors,
     init_times=None,
     init_loc=None,
     Ne=10000,
