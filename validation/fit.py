@@ -54,6 +54,8 @@ def fit_guide(
     )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale
+    print("prior_loc.mean()",prior_loc.mean().item())
+    print("prior_scale.mean()",prior_scale.mean().item())
     model = model.to(device=device)
 
     def init_loc_fn(site):
