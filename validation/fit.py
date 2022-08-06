@@ -7,6 +7,7 @@ from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
 from pyro.optim import MultiStepLR, ClippedAdam
 from tspyro.ops import get_ancestral_geography
+import scipy
 
 from models import NaiveModel, mean_field_location
 
@@ -50,6 +51,10 @@ def fit_guide(
         migration_likelihood=migration_likelihood,
         location_model=location_model,
     )
+    prior_loc = model.prior_loc
+    prior_scale = model.prior_scale
+    print("prior_loc.mean()",prior_loc.mean().item())
+    print("prior_scale.mean()",prior_scale.mean().item())
     model = model.to(device=device)
 
     def init_loc_fn(site):
