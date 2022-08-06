@@ -31,6 +31,7 @@ def fit_guide(
     log_every=100,
     clip_norm=100.0,
     device=None,
+    poisson_likelihood=True,
     seed=0,
     scale_factor=None,
     num_eval_samples=500,
@@ -50,6 +51,7 @@ def fit_guide(
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
         location_model=location_model,
+        poisson_likelihood=poisson_likelihood,
     )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale

@@ -79,6 +79,7 @@ class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
+        self.poisson_likelihood = kwargs.pop("poisson_likelihood", True)
         super().__init__(*args, **kwargs)
 
     def forward(self):
@@ -118,11 +119,23 @@ class NaiveModel(BaseModel):
             pyro.factor("gap_constraint", gap - clamped_gap)
 
             rate = (clamped_gap * self.span * self.mutation_rate).clamp(min=1e-8)
-            pyro.sample(
-                "mutations",
-                dist.Poisson(rate),
-                obs=self.mutations,
-            )
+            if self.poisson_likelihood:
+                pyro.sample(
+                    "mutations",
+                    dist.Poisson(rate),
+                    obs=self.mutations,
+                )
+            else:
+                total_count = pyro.param("total_count", torch.tensor(20.0),
+                    constraint=torch.distributions.constraints.positive)
+                rate_sigma = pyro.param("rate_sigma", torch.tensor(1.0e-2),
+                    constraint=torch.distributions.constraints.positive)
+                logits = rate.log() - total_count.log() - 0.5 * rate_sigma.pow(2.0)
+                pyro.sample(
+                    "mutations",
+                    dist.LogNormalNegativeBinomial(total_count=total_count, logits=logits,
+                        multiplicative_noise_scale=rate_sigma),
+                    obs=self.mutations)
 
             if self.migration_likelihood is None:
                 location = torch.ones(self.ts.num_nodes)
