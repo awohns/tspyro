@@ -62,7 +62,7 @@ def main(args):
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma)
+            gamma=args.gamma, Ne=args.Ne)
 
     elif args.model == 'joint':  # Let's perform joint inference of time and location
         leaf_locations, internal_locations = get_leaf_locations(ts)
@@ -72,7 +72,7 @@ def main(args):
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
-            mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma)
 
         inferred_internal_locations = inferred_locations[ts.num_samples:]
@@ -105,16 +105,16 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_50_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_200_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--model', type=str, default='time', choices=['time', 'space', 'joint'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.2)
-    parser.add_argument('--num-milestones', type=int, default=4)
+    parser.add_argument('--gamma', type=float, default=0.1)
+    parser.add_argument('--num-milestones', type=int, default=2)
     parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=50000)
+    parser.add_argument('--num-steps', type=int, default=30000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 
