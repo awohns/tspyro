@@ -7,6 +7,7 @@ from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
 from pyro.optim import MultiStepLR, ClippedAdam
 from tspyro.ops import get_ancestral_geography
+import scipy
 
 from models import NaiveModel, mean_field_location
 
@@ -46,12 +47,13 @@ def fit_guide(
     model = Model(
         ts=ts,
         leaf_location=leaf_location,
-        prior=priors,
         Ne=Ne,
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
         location_model=location_model,
     )
+    prior_loc = model.prior_loc
+    prior_scale = model.prior_scale
     model = model.to(device=device)
 
     def init_loc_fn(site):
@@ -60,12 +62,9 @@ def fit_guide(
             if init_times is not None:
                 internal_time = init_times
             else:
-                prior_grid_data = priors.grid_data[
-                    priors.row_lookup[ts.num_samples :]  # noqa: E203
-                ]
-                prior_init = np.einsum(
-                    "t,nt->n", priors.timepoints, (prior_grid_data)
-                ) / np.sum(prior_grid_data, axis=1)
+                prior_init = scipy.stats.lognorm.mean(
+                    prior_loc, scale=prior_scale
+                )
                 internal_time = torch.as_tensor(
                     prior_init, dtype=torch.get_default_dtype(), device=device
                 )  # / Ne

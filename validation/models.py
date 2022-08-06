@@ -4,12 +4,26 @@ import torch
 from pyro.nn import PyroModule
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
-from tspyro.ops import CummaxUpTree, edges_by_parent_asc, get_mut_edges, latlong_to_xyz
+from tspyro.ops import (
+    CummaxUpTree,
+    edges_by_parent_asc,
+    get_ancestral_geography,
+    get_mut_edges,
+    latlong_to_xyz,
+)
+import tsdate
 
 
 class BaseModel(PyroModule):
     def __init__(
-        self, ts, *, Ne, prior, leaf_location=None, mutation_rate=1e-8, penalty=100.0
+        self,
+        ts,
+        *,
+        Ne,
+        leaf_location=None,
+        mutation_rate=1e-8,
+        penalty=100.0,
+        progress=False,
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -35,16 +49,31 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        timepoints = torch.tensor(prior.timepoints, dtype=torch.get_default_dtype())
-        timepoints = timepoints.log1p()
-        prior_grid_data = prior.grid_data[prior.row_lookup[ts.num_samples :]]  # noqa:
-        grid_data = torch.as_tensor(prior_grid_data, dtype=torch.get_default_dtype())
-        grid_data = grid_data / grid_data.sum(1, True)
-        self.prior_loc = torch.einsum("t,nt->n", timepoints, grid_data)
-        self.prior_loc = self.prior_loc.nan_to_num(1)
-        deltas = (timepoints - self.prior_loc[:, None]) ** 2
-        self.prior_scale = torch.einsum("nt,nt->n", deltas, grid_data).sqrt()
-        self.prior_scale = self.prior_scale.nan_to_num(1)
+        span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
+        approximate_prior_size = 1000
+        prior_distribution = "lognorm"
+        base_priors = tsdate.prior.ConditionalCoalescentTimes(
+            approximate_prior_size, self.Ne, prior_distribution, progress=progress
+        )
+        base_priors.add(ts.num_samples, True)
+
+        for total_fixed in span_data.total_fixed_at_0_counts:
+            # For missing data: trees vary in total fixed node count => have
+            # different priors
+            if total_fixed > 0:
+                base_priors.add(total_fixed, True)
+
+        prior_params = base_priors.get_mixture_prior_params(span_data)
+        self.prior_scale = torch.exp(
+            torch.tensor(
+                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+            )
+        )
+        self.prior_loc = torch.sqrt(
+            torch.tensor(
+                prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
+            )
+        )
 
         self.leaf_location = leaf_location
 
@@ -271,7 +300,7 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location)
     migration_radius = (delta_loc_sq / gap).mean().sqrt()
 
     if torch.rand(1).item() < 0.001:
-        print("migration_radius",migration_radius.item())
+        print("migration_radius", migration_radius.item())
 
     pyro.sample(
         "migration",

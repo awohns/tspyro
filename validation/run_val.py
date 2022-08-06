@@ -106,7 +106,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_999_0.trees')
+    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_50_0.trees')
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--model', type=str, default='time', choices=['time', 'space', 'joint'])
     parser.add_argument('--init-lr', type=float, default=0.05)
