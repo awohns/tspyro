@@ -7,7 +7,6 @@ from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import (
     CummaxUpTree,
     edges_by_parent_asc,
-    get_ancestral_geography,
     get_mut_edges,
     latlong_to_xyz,
 )
@@ -105,12 +104,10 @@ class NaiveModel(BaseModel):
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
         time[..., self.is_internal] = internal_time
 
-        # Should we be Bayesian about migration scale, or should it be fixed?
+        migration_scale = None
         if self.migration_likelihood is not None:
-            #migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
-            migration_scale = torch.tensor(-1.0)
-        else:
-            migration_scale = torch.tensor(-1.0)
+            if self.migration_likelihood.__name__ == "euclidean_migration":
+                migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
 
         # Next add a factor for time gaps between parents and children.
         gap = time[..., self.parent] - time[..., self.child]
@@ -140,9 +137,12 @@ class NaiveModel(BaseModel):
                     ],
                     -2,
                 )
-                self.migration_likelihood(
+                migration_scale = self.migration_likelihood(
                     self.parent, self.child, migration_scale, time, location
                 )
+                if self.migration_likelihood.__name__ == 'marginal_likelihood':
+                    pyro.deterministic('migration_scale', migration_scale)
+
         return time, gap, location, migration_scale
 
 
@@ -295,16 +295,15 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location)
     parent_location = location.index_select(-2, parent)
     child_location = location.index_select(-2, child)
     delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)
-    migration_radius = (delta_loc_sq / gap).mean().sqrt()
-
-    if torch.rand(1).item() < 0.001:
-        print("migration_radius", migration_radius.item())
+    migration_scale = (delta_loc_sq / gap).mean().sqrt()
 
     pyro.sample(
         "migration",
-        dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+        dist.Normal(parent_location, migration_scale[..., None]).to_event(1),
         obs=child_location,
     )
+
+    return migration_scale
 
 
 def euclidean_migration(parent, child, migration_scale, time, location):
@@ -329,30 +328,13 @@ def euclidean_migration(parent, child, migration_scale, time, location):
     # in case you want to draw multiple samples.
     migration_radius = migration_scale[..., None] * gap ** 0.5
 
-    # Assume migration folows a bivariate normal distribution, so that
-    # distance follows a Gamma(2,-) distribution.  While a more theoretically
-    # sound model might replace the Brownian motion's Wiener process with a
-    # heavier tailed Levy stable process, the Stable distribution's tail is so
-    # heavy that inference becomes intractable.  To give our unimodal
-    # variational posterior a chance of finding the right mode, we use a
-    # log-concave likelihood with tails heavier than Normal but lighter than
-    # Stable.  An alternative might be to anneal tail weight.
+    pyro.sample(
+        "migration",
+        dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
+        obs=child_location,
+    )
 
-    if False:
-        distance = torch.linalg.norm(child_location - parent_location, dim=-1, ord=2)
-        distance = distance.clamp(min=1e-6)
-        pyro.sample(
-            "migration",
-            dist.Gamma(2, 1 / migration_radius),
-            obs=distance,
-        )
-    # This is equivalent to
-    else:
-        pyro.sample(
-            "migration",
-            dist.Normal(parent_location, migration_radius[..., None]).to_event(1),
-            obs=child_location,
-        )
+    return migration_scale
 
 
 def spherical_migration(parent, child, migration_scale, time, location):

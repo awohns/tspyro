@@ -8,7 +8,6 @@ from pyro.infer import Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
 from pyro.optim import MultiStepLR, ClippedAdam
 from tspyro.ops import get_ancestral_geography
-import scipy
 
 from models import NaiveModel, mean_field_location
 
@@ -133,12 +132,6 @@ def fit_guide(
                 f"Migration scale = {migration_scale}, "
                 f"time conv. diagnostic = {time_conv_diagnostic:0.5g}"
             )
-            if 'internal_location' in median:
-                loc = median['internal_location']
-                delta = (loc.unsqueeze(-1) - loc.unsqueeze(-2)).pow(2.0).sum(-1).sqrt()
-                diag = torch.arange(delta.size(-1))
-                delta[diag, diag] = torch.inf
-                print("delta_min", delta.min().item())
 
     final_elbo = np.mean([svi.evaluate_loss() for _ in range(num_eval_samples)])
     print("final_elbo: {:.4f}".format(final_elbo))

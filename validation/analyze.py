@@ -94,7 +94,7 @@ def main(args):
         pyro_metrics.update(compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_internal_times))
 
     for k, v in pyro_metrics.items():
-        print('[pyro-{}] '.format(result['model']) + k + ': {:.4f}'.format(v))
+        print('[pyro-mig-{}] '.format(result['migration']) + k + ': {:.4f}'.format(v))
 
 
 if __name__ == "__main__":
