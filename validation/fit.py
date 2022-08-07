@@ -64,7 +64,6 @@ def fit_guide(
                 internal_time = init_times
             else:
                 internal_time = dist.LogNormal(prior_loc, prior_scale).mean.to(device=device)
-                internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
             internal_diff = model.prior_diff_loc.exp()
