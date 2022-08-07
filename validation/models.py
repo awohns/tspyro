@@ -48,6 +48,7 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
+        nodes_to_date = ~self.is_leaf
         span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
         approximate_prior_size = 1000
         prior_distribution = "lognorm"
@@ -62,14 +63,14 @@ class BaseModel(PyroModule):
             if total_fixed > 0:
                 base_priors.add(total_fixed, True)
 
-        prior_params = base_priors.get_mixture_prior_params(span_data)
+        prior_params = base_priors.get_mixture_prior_params(span_data)[:-1]
         self.prior_scale = torch.sqrt(
             torch.tensor(
-                prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
+                prior_params[nodes_to_date, 1], dtype=torch.get_default_dtype()
             )
         )
         self.prior_loc = torch.tensor(
-                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+                prior_params[nodes_to_date, 0], dtype=torch.get_default_dtype()
             )
 
         self.leaf_location = leaf_location

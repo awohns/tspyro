@@ -54,6 +54,7 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
+        nodes_to_date = ~self.is_leaf
         span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
         approximate_prior_size = 1000
         prior_distribution = "lognorm"
@@ -71,11 +72,11 @@ class BaseModel(PyroModule):
         prior_params = base_priors.get_mixture_prior_params(span_data)
         self.prior_scale = torch.sqrt(
             torch.tensor(
-                prior_params[ts.num_samples : -1, 1], dtype=torch.get_default_dtype()
+                prior_params[nodes_to_date, 1], dtype=torch.get_default_dtype()
             )
         )
         self.prior_loc = torch.tensor(
-                prior_params[ts.num_samples : -1, 0], dtype=torch.get_default_dtype()
+                prior_params[nodes_to_date, 0], dtype=torch.get_default_dtype()
             )
 
         self.leaf_location = leaf_location
@@ -452,7 +453,6 @@ def fit_guide(
                 internal_time = init_times 
             else:
                 internal_time = dist.LogNormal(model.prior_loc, model.prior_scale).mean.to(device=device)
-                internal_time = internal_time.nan_to_num(10)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
             internal_diff = model.prior_diff_loc.exp()
