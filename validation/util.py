@@ -22,7 +22,7 @@ def get_time_mask(ts, time_cutoff, times):
     return mask
 
 
-def get_metadata(ts, args):
+def get_metadata(ts):
     locations = []
     for node in ts.nodes():
         if node.individual != -1:

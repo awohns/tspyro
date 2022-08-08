@@ -32,13 +32,13 @@ def main(args):
         milestones = np.linspace(0, args.num_steps, args.num_milestones + 2)[1:-1]
         print("optim milestones: ", milestones)
 
-    locations, true_times, is_leaf, is_internal = get_metadata(ts, args)
+    locations, true_times, is_leaf, is_internal = get_metadata(ts)
     device = 'cpu' if args.device == 'cpu' else 'cuda'
 
     if args.time_init == 'prior':
         init_times = None
     elif args.time_init == 'tsdate':
-        init_times = compute_baselines(args, Ne=args.Ne, mu=args.mu,
+        init_times = compute_baselines(args.ts, Ne=args.Ne, mu=args.mu,
                                        true_internal_times=ts.tables.nodes.time[is_internal],
                                        is_internal=is_internal)[0]['tsdate_times'][is_internal]
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype(), device=device)
@@ -56,7 +56,7 @@ def main(args):
 
     # Let's perform joint inference of time and location
     elif args.migration in ['euclidean', 'marginal_euclidean']:
-        tsdate_times = compute_baselines(args, Ne=args.Ne, mu=args.mu)[0]['tsdate_times']
+        tsdate_times = compute_baselines(args.ts, Ne=args.Ne, mu=args.mu)[0]['tsdate_times']
         time_mask = get_time_mask(ts, args.time_cutoff, tsdate_times)
         migration_likelihood = poutine.mask(marginal_euclidean_migration, mask=time_mask) if 'marg' in args.migration else \
             poutine.mask(euclidean_migration, mask=time_mask)
@@ -101,15 +101,15 @@ if __name__ == "__main__":
     parser.add_argument('--time', type=str, default='naive', choices=['naive'])
     parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--init-lr', type=float, default=0.05)
-    parser.add_argument('--time-cutoff', type=float, default=100.0)
+    parser.add_argument('--time-cutoff', type=float, default=20.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.1)
-    parser.add_argument('--gap-prefactor', type=float, default=20.0)
+    parser.add_argument('--gap-prefactor', type=float, default=10.0)
     parser.add_argument('--gap-exponent', type=float, default=1.0)
     parser.add_argument('--num-milestones', type=int, default=2)
     parser.add_argument('--Ne', type=int, default=2000)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=45 * 1000)
+    parser.add_argument('--num-steps', type=int, default=30 * 1000)
     parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()

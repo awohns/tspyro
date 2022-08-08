@@ -60,11 +60,11 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     return result
 
 
-def compute_baselines(args, Ne=None, mu=1.0e-8, baselines_dir='./baselines/'):
-    ts = load_data(args.ts)
-    locations, true_times, is_leaf, is_internal = get_metadata(ts, args)
+def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baselines/'):
+    ts = load_data(ts_filename)
+    locations, true_times, is_leaf, is_internal = get_metadata(ts)
 
-    f = baselines_dir + 'baselines.{}.pkl'.format(args.ts)
+    f = baselines_dir + 'baselines.{}.pkl'.format(ts_filename)
     if exists(f):
         metrics = pickle.load(open(f, 'rb'))
     else:  # else compute baseline metrics
@@ -116,7 +116,6 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--num-nodes', type=int, default=500)
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.trees')
     args = parser.parse_args()
 
     main(args)
