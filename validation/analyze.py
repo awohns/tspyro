@@ -58,7 +58,7 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     return result
 
 
-def compute_baselines(ts_filename, Ne=None, true_internal_times=None,
+def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, true_internal_times=None,
                       is_internal=None, true_locations=None,
                       baselines_dir='./baselines/'):
 
@@ -69,7 +69,7 @@ def compute_baselines(ts_filename, Ne=None, true_internal_times=None,
     # else compute baseline metrics
     ts = load_data(ts_filename)
 
-    tsdate_times = tsdate.date(ts, mutation_rate=1e-8, Ne=Ne).tables.nodes.time
+    tsdate_times = tsdate.date(ts, mutation_rate=mu, Ne=Ne).tables.nodes.time
     tsdate_internal_times = tsdate_times[is_internal]
     time_metrics = {'tsdate_times': tsdate_times}
     time_metrics.update(compute_time_metrics(true_internal_times, tsdate_internal_times))
@@ -86,10 +86,11 @@ def main(args):
     true_internal_times = result['true_internal_times']
     ts_filename = result['ts_filename']
     Ne = result['Ne']
+    mu = result['mu']
 
     print("final_elbo: {:.4f}".format(result['final_elbo']))
 
-    baselines = compute_baselines(ts_filename, Ne=Ne, true_internal_times=true_internal_times,
+    baselines = compute_baselines(ts_filename, Ne=Ne, mu=mu, true_internal_times=true_internal_times,
                                   is_internal=result['is_internal'])
     for k, v in baselines.items():
         if v.size == 1:

@@ -12,9 +12,9 @@ from models import euclidean_migration, marginal_euclidean_migration
 from analyze import compute_baselines
 
 
-def load_data(filename):
-    ts = tskit.load(filename).simplify()
-    print("Tree sequence has {} nodes".format(ts.num_samples))
+def load_data(args):
+    ts = tskit.load(args.ts).simplify()
+    print("Tree sequence {} has {} nodes. Using Ne = {} and mu = {:.1e}.".format(args.ts, ts.num_samples, args.Ne, args.mu))
     return ts
 
 
@@ -47,7 +47,7 @@ def get_metadata(ts, args):
 def main(args):
     print(args)
 
-    ts = load_data(args.ts)
+    ts = load_data(args)
 
     result = {}
 
@@ -62,7 +62,7 @@ def main(args):
     if args.time_init == 'prior':
         init_times = None
     elif args.time_init == 'tsdate':
-        init_times = compute_baselines(args.ts, Ne=args.Ne,
+        init_times = compute_baselines(args.ts, Ne=args.Ne, mu=args.mu,
                                        true_internal_times=ts.tables.nodes.time[is_internal],
                                        is_internal=is_internal)['tsdate_times'][is_internal]
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype())
@@ -101,6 +101,7 @@ def main(args):
     result['true_times'] = ts.tables.nodes.time
     result['true_internal_times'] = ts.tables.nodes.time[is_internal]
     result['Ne'] = args.Ne
+    result['mu'] = args.mu
     result['time_cutoff'] = args.time_cutoff
     result['ts_filename'] = args.ts
     result['final_elbo'] = final_elbo
@@ -121,20 +122,20 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    default_ts = 'slim_2d_continuous_recapitated_mutated.down_200_0.trees'
+    default_ts = 'slim_2d_Ne_2000_continuous_recapitated_mutated_mu_1e9.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
     parser.add_argument('--time', type=str, default='naive', choices=['naive'])
-    parser.add_argument('--time-init', type=str, default='tsdate', choices=['prior', 'tsdate', 'truth'])
+    parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.2)
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=2000)
-    parser.add_argument('--mu', type=float, default=1.0e-7)
+    parser.add_argument('--mu', type=float, default=1.0e-9)
     parser.add_argument('--num-steps', type=int, default=40000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
