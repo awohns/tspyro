@@ -51,7 +51,8 @@ def main(args):
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, Ne=args.Ne, mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma, init_times=init_times, device=device)
+            gamma=args.gamma, init_times=init_times, device=device,
+            gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent)
 
     # Let's perform joint inference of time and location
     elif args.migration in ['euclidean', 'marginal_euclidean']:
@@ -63,7 +64,8 @@ def main(args):
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
             mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
-            init_times=init_times, device=device)
+            init_times=init_times, device=device,
+            gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent)
 
         inferred_internal_locations = inferred_locations[is_internal]
 
@@ -79,16 +81,17 @@ def main(args):
     result['final_elbo'] = final_elbo
     result['migration'] = args.migration
 
-    tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.{}'
-    tag = tag.format(args.migration, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
-                     args.num_milestones, int(10 * args.gamma), args.time_init, int(1000 * args.init_lr), args.ts)
+    tag = '{}.tcut{}.s{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.gap_{}_{}.{}'
+    tag = tag.format(args.migration, args.time_cutoff, args.seed, args.num_steps // 1000,
+                     args.num_milestones, int(10 * args.gamma), args.time_init, int(1000 * args.init_lr),
+                     int(10 * args.gap_prefactor), int(10 * args.gap_exponent), args.ts)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    default_ts = 'slim_2d_continuous_recapitated_mutated.down_200_0.trees'
+    default_ts = 'slim_2d_Ne_2000_continuous_recapitated_length_1e8_mutated_mu_1e8_rep_1.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--migration', type=str, default='none',
@@ -99,10 +102,12 @@ if __name__ == "__main__":
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.1)
+    parser.add_argument('--gap-prefactor', type=float, default=5.0)
+    parser.add_argument('--gap-exponent', type=float, default=1.0)
     parser.add_argument('--num-milestones', type=int, default=2)
-    parser.add_argument('--Ne', type=int, default=1000)
+    parser.add_argument('--Ne', type=int, default=2000)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=30 * 1000)
+    parser.add_argument('--num-steps', type=int, default=45 * 1000)
     parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()

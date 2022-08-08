@@ -35,6 +35,8 @@ def fit_guide(
     seed=0,
     scale_factor=None,
     num_eval_samples=500,
+    gap_prefactor=1.0,
+    gap_exponent=1.0,
 ):
     assert isinstance(Model, type)
 
@@ -48,6 +50,8 @@ def fit_guide(
         mutation_rate=mutation_rate,
         migration_likelihood=migration_likelihood,
         location_model=location_model,
+        gap_prefactor=gap_prefactor,
+        gap_exponent=gap_exponent,
     )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale

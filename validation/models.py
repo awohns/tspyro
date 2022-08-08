@@ -23,6 +23,8 @@ class BaseModel(PyroModule):
         mutation_rate=1e-8,
         penalty=100.0,
         progress=False,
+        gap_prefactor=1.0,
+        gap_exponent=1.0,
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -33,6 +35,9 @@ class BaseModel(PyroModule):
         self.num_internal = self.is_internal.sum().item()
 
         self.ts = ts
+
+        self.gap_prefactor = gap_prefactor
+        self.gap_exponent = gap_exponent
 
         self.parent = torch.tensor(edges.parent, dtype=torch.long)
         self.child = torch.tensor(edges.child, dtype=torch.long)
@@ -116,7 +121,11 @@ class NaiveModel(BaseModel):
             # Penalize gaps that are less than 1.
             clamped_gap = gap.clamp(min=1)
             # TODO should we multiply this by e.g. 0.1
-            pyro.factor("gap_constraint", gap - clamped_gap)
+            prefactor, exponent = self.gap_prefactor, self.gap_exponent
+            if exponent != 1.0:
+                pyro.factor("gap_constraint", prefactor * (gap - clamped_gap).pow(exponent))
+            else:
+                pyro.factor("gap_constraint", prefactor * (gap - clamped_gap))
 
             rate = (clamped_gap * self.span * self.mutation_rate).clamp(min=1e-8)
             pyro.sample(
