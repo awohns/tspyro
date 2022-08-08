@@ -60,11 +60,11 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     return result
 
 
-def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baselines/'):
-    ts = load_data(ts_filename)
-    locations, true_times, is_leaf, is_internal, _ = get_metadata(ts, args)
+def compute_baselines(args, Ne=None, mu=1.0e-8, baselines_dir='./baselines/'):
+    ts = load_data(args.ts)
+    locations, true_times, is_leaf, is_internal = get_metadata(ts, args)
 
-    f = baselines_dir + 'baselines.{}.pkl'.format(ts_filename)
+    f = baselines_dir + 'baselines.{}.pkl'.format(args.ts)
     if exists(f):
         metrics = pickle.load(open(f, 'rb'))
     else:  # else compute baseline metrics

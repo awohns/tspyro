@@ -11,9 +11,9 @@ def downsample_ts(filename, num_nodes, seed):
     sampled_ts.dump(filename.split('.')[0] + '.down_{}_{}.trees'.format(num_nodes, seed))
 
 
-def get_time_mask(ts, args):
+def get_time_mask(ts, time_cutoff, times):
     # We restrict inference of locations to nodes within time_cutoff generations of the samples (which are all at time zero)
-    masked = ts.tables.nodes.time >= args.time_cutoff
+    masked = times >= time_cutoff
     mask = torch.ones(ts.num_edges, dtype=torch.bool)
     for e, edge in enumerate(ts.edges()):
         if masked[edge.child]:
@@ -32,8 +32,6 @@ def get_metadata(ts, args):
 
     is_leaf = np.array(ts.tables.nodes.flags & 1, dtype=bool)
     is_internal = ~is_leaf
-    time_mask = get_time_mask(ts, args)
-
     true_times = ts.tables.nodes.time
 
-    return np.array(locations), true_times, is_leaf, is_internal, time_mask
+    return np.array(locations), true_times, is_leaf, is_internal
