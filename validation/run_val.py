@@ -10,38 +10,13 @@ from pyro import poutine
 from fit import fit_guide
 from models import euclidean_migration, marginal_euclidean_migration
 from analyze import compute_baselines
+from util import get_metadata
 
 
 def load_data(args):
     ts = tskit.load(args.ts).simplify()
     print("Tree sequence {} has {} nodes. Using Ne = {} and mu = {:.1e}.".format(args.ts, ts.num_samples, args.Ne, args.mu))
     return ts
-
-
-def get_time_mask(ts, args):
-    # We restrict inference of locations to nodes within time_cutoff generations of the samples (which are all at time zero)
-    masked = ts.tables.nodes.time >= args.time_cutoff
-    mask = torch.ones(ts.num_edges, dtype=torch.bool)
-    for e, edge in enumerate(ts.edges()):
-        if masked[edge.child]:
-            mask[e] = False
-
-    return mask
-
-
-def get_metadata(ts, args):
-    locations = []
-    for node in ts.nodes():
-        if node.individual != -1:
-            locations.append(ts.individual(node.individual).location[:2])
-        else:
-            locations.append(np.array([np.nan, np.nan]))
-
-    is_leaf = np.array(ts.tables.nodes.flags & 1, dtype=bool)
-    is_internal = ~is_leaf
-    time_mask = get_time_mask(ts, args)
-
-    return np.array(locations), is_leaf, is_internal, time_mask
 
 
 def main(args):
@@ -57,7 +32,7 @@ def main(args):
         milestones = np.linspace(0, args.num_steps, args.num_milestones + 2)[1:-1]
         print("optim milestones: ", milestones)
 
-    locations, is_leaf, is_internal, time_mask = get_metadata(ts, args)
+    locations, true_times, is_leaf, is_internal, time_mask = get_metadata(ts, args)
 
     if args.time_init == 'prior':
         init_times = None
@@ -93,25 +68,15 @@ def main(args):
 
         result['inferred_migration_scale'] = inferred_migration_scale.item()
         result['inferred_internal_locations'] = inferred_internal_locations.data.cpu().numpy()
-        result['true_internal_locations'] = locations[is_internal]
 
-    result['inferred_times'] = inferred_times.data.cpu().numpy()
     result['inferred_internal_times'] = inferred_times.data.cpu().numpy()[is_internal]
     result['losses'] = losses
-    result['true_times'] = ts.tables.nodes.time
-    result['true_internal_times'] = ts.tables.nodes.time[is_internal]
     result['Ne'] = args.Ne
     result['mu'] = args.mu
     result['time_cutoff'] = args.time_cutoff
     result['ts_filename'] = args.ts
     result['final_elbo'] = final_elbo
     result['migration'] = args.migration
-    result['is_leaf'] = is_leaf
-    result['is_internal'] = is_internal
-
-    assert result['true_times'].shape == result['inferred_times'].shape
-    if 'inferred_internal_locations' in result:
-        assert result['inferred_internal_locations'].shape == result['inferred_internal_locations'].shape
 
     tag = '{}.tcut{}.s{}.Ne{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.{}'
     tag = tag.format(args.migration, args.time_cutoff, args.seed, args.Ne, args.num_steps // 1000,
@@ -122,7 +87,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    default_ts = 'slim_2d_Ne_2000_continuous_recapitated_mutated_mu_1e9.trees'
+    default_ts = 'slim_2d_continuous_recapitated_mutated.down_999_0.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--migration', type=str, default='none',
@@ -132,12 +97,12 @@ if __name__ == "__main__":
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.2)
-    parser.add_argument('--num-milestones', type=int, default=3)
-    parser.add_argument('--Ne', type=int, default=2000)
-    parser.add_argument('--mu', type=float, default=1.0e-9)
-    parser.add_argument('--num-steps', type=int, default=40000)
-    parser.add_argument('--log-every', type=int, default=2000)
+    parser.add_argument('--gamma', type=float, default=0.1)
+    parser.add_argument('--num-milestones', type=int, default=2)
+    parser.add_argument('--Ne', type=int, default=1000)
+    parser.add_argument('--mu', type=float, default=1.0e-8)
+    parser.add_argument('--num-steps', type=int, default=30 * 1000)
+    parser.add_argument('--log-every', type=int, default=3000)
     args = parser.parse_args()
 
     main(args)

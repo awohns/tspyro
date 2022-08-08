@@ -132,7 +132,7 @@ def fit_guide(
                         migration_scale = None
             time_conv_diagnostic = torch.abs(last_internal_log_time - median['internal_time'].log()).mean().item()
             last_internal_log_time = median['internal_time'].log().clone()
-            ips = 0.0 if step == 0 else log_every / (ts[-1] - ts[-1 - log_every])
+            ips = 0.0 if step == 0 or steps <= log_every else log_every / (ts[-1] - ts[-1 - log_every])
             print(
                 f"step {step} loss = {loss:0.5g}, "
                 f"Migration scale = {migration_scale}, "
