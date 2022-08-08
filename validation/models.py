@@ -48,7 +48,7 @@ class BaseModel(PyroModule):
         self.mutation_rate = mutation_rate
 
         # conditional coalescent prior
-        nodes_to_date = ~self.is_leaf
+        nodes_to_date = (~self.is_leaf).data.cpu().numpy()
         span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
         approximate_prior_size = 1000
         prior_distribution = "lognorm"
@@ -102,7 +102,7 @@ class NaiveModel(BaseModel):
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
-        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
+        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,)).type_as(internal_time)
         time[..., self.is_internal] = internal_time
 
         migration_scale = None

@@ -31,7 +31,7 @@ def fit_guide(
     learning_rate_decay=0.1,
     log_every=100,
     clip_norm=100.0,
-    device=None,
+    device=torch.device("cpu"),
     seed=0,
     scale_factor=None,
     num_eval_samples=500,
@@ -40,9 +40,6 @@ def fit_guide(
 
     pyro.set_rng_seed(seed)
     pyro.clear_param_store()
-
-    if device is None:
-        device = torch.device("cpu")
 
     model = Model(
         ts=ts,
@@ -73,7 +70,7 @@ def fit_guide(
             if init_loc is not None:
                 initial_guess_loc = init_loc
             else:
-                initial_guess_loc = get_ancestral_geography(ts, leaf_location)
+                initial_guess_loc = get_ancestral_geography(ts, leaf_location.data.cpu().numpy()).to(device=device)
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
@@ -140,6 +137,7 @@ def fit_guide(
                 f"iter. per sec. = {ips:0.2f}"
             )
 
+    num_eval_samples = num_eval_samples if steps > 10000 else 1
     final_elbo = np.mean([svi.evaluate_loss() for _ in range(num_eval_samples)])
     print("final_elbo: {:.4f}".format(final_elbo))
 
