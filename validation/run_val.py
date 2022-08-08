@@ -73,7 +73,7 @@ def main(args):
     # Let's only infer times
     if args.migration == 'none':
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
-            ts, leaf_location=None, Ne=args.Ne, mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every,
+            ts, leaf_location=None, Ne=args.Ne, mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
             gamma=args.gamma, init_times=init_times)
 
@@ -85,7 +85,7 @@ def main(args):
 
         inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
-            mutation_rate=1e-8, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
+            mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
             init_times=init_times)
 
@@ -121,19 +121,21 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
-    parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.down_500_0.trees')
+    default_ts = 'slim_2d_continuous_recapitated_mutated.down_200_0.trees'
+    parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./out/')
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
     parser.add_argument('--time', type=str, default='naive', choices=['naive'])
-    parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
+    parser.add_argument('--time-init', type=str, default='tsdate', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--init-lr', type=float, default=0.05)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.1)
-    parser.add_argument('--num-milestones', type=int, default=2)
-    parser.add_argument('--Ne', type=int, default=1000)
-    parser.add_argument('--num-steps', type=int, default=30000)
+    parser.add_argument('--gamma', type=float, default=0.2)
+    parser.add_argument('--num-milestones', type=int, default=3)
+    parser.add_argument('--Ne', type=int, default=2000)
+    parser.add_argument('--mu', type=float, default=1.0e-7)
+    parser.add_argument('--num-steps', type=int, default=40000)
     parser.add_argument('--log-every', type=int, default=2000)
     args = parser.parse_args()
 

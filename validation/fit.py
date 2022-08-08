@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pyro
 import torch
@@ -105,6 +106,7 @@ def fit_guide(
     guide()  # initialises the guide
 
     losses = []
+    ts = [time.time()]
     migration_scales = []
     last_internal_log_time = unbound_guide.median()['internal_time'].log().clone()
 
@@ -112,6 +114,7 @@ def fit_guide(
         loss = svi.step() / ts.num_nodes if scale_factor == 1.0 else svi.step()
         if milestones is not None:
             optim.step()
+        ts.append(time.time())
         losses.append(loss)
         if step % log_every == 0 or step == steps - 1:
             loss = np.mean([svi.evaluate_loss() for _ in range(20)])
@@ -129,10 +132,12 @@ def fit_guide(
                         migration_scale = None
             time_conv_diagnostic = torch.abs(last_internal_log_time - median['internal_time'].log()).mean().item()
             last_internal_log_time = median['internal_time'].log().clone()
+            ips = 0.0 if step == 0 else log_every / (ts[-1] - ts[-1 - log_every])
             print(
                 f"step {step} loss = {loss:0.5g}, "
                 f"Migration scale = {migration_scale}, "
-                f"time conv. diagnostic = {time_conv_diagnostic:0.5g}"
+                f"time conv. diagnostic = {time_conv_diagnostic:0.3g}, "
+                f"iter. per sec. = {ips:0.2f}"
             )
 
     final_elbo = np.mean([svi.evaluate_loss() for _ in range(num_eval_samples)])

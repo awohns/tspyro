@@ -113,7 +113,6 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--num-nodes', type=int, default=500)
     parser.add_argument('--ts', type=str, default='slim_2d_continuous_recapitated_mutated.trees')
-    parser.add_argument('--Ne', type=int, default=1000)
     args = parser.parse_args()
 
     main(args)
