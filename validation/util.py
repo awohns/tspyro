@@ -26,7 +26,11 @@ def get_metadata(ts):
     locations = []
     for node in ts.nodes():
         if node.individual != -1:
-            locations.append(ts.individual(node.individual).location[:2])
+            loc = ts.individual(node.individual).location[:2]
+            if len(loc) == 2:
+                locations.append(ts.individual(node.individual).location[:2])
+            else:
+                locations.append(np.array([np.nan, np.nan]))
         else:
             locations.append(np.array([np.nan, np.nan]))
 

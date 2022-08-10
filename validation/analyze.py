@@ -1,3 +1,5 @@
+import json
+import math
 import argparse
 import pickle
 from os.path import exists
@@ -68,13 +70,23 @@ def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baseline
     if exists(f):
         metrics = pickle.load(open(f, 'rb'))
     else:  # else compute baseline metrics
-        tsdate_times = tsdate.date(ts, mutation_rate=mu, Ne=Ne).tables.nodes.time
+        dated_ts = tsdate.date(ts, mutation_rate=mu, Ne=Ne)
+        tsdate_times = dated_ts.tables.nodes.time
+
+        #unconstrained_inferred_times = np.zeros(dated_ts.num_nodes)
+        #for node in dated_ts.nodes():
+        #    if node.id not in dated_ts.samples():
+        #        unconstrained_inferred_times[node.id] = json.loads(node.metadata)["mn"]
+        #tsdate_times = unconstrained_inferred_times
+
         tsdate_internal_times = tsdate_times[is_internal]
         metrics = {'tsdate_times': tsdate_times}
         metrics.update(compute_time_metrics(true_times[is_internal], tsdate_internal_times))
 
-        ancestral_locs = get_ancestral_geography(ts, locations[is_leaf]).data.cpu().numpy()
-        metrics.update(compute_spatial_metrics(locations[is_internal], ancestral_locs, true_times[is_internal]))
+        has_locations = np.isnan(locations).sum().item() < locations.size
+        if has_locations:
+            ancestral_locs = get_ancestral_geography(ts, locations[is_leaf]).data.cpu().numpy()
+            metrics.update(compute_spatial_metrics(locations[is_internal], ancestral_locs, true_times[is_internal]))
 
         pickle.dump(metrics, open(f, 'wb'))
 
@@ -93,12 +105,22 @@ def main(args):
     print("final_elbo: {:.4f}".format(result['final_elbo']))
 
     baselines, locations, true_times, is_leaf, is_internal = compute_baselines(ts_filename, Ne=Ne, mu=mu)
+    if False:
+        inferred_times = np.zeros(true_times.shape)
+        inferred_times[is_internal] = inferred_internal_times
+        inferred_internal_times2 = inferred_internal_times.copy()
+        inferred_internal_times = tsdate.core.constrain_ages_topo(ts, inferred_times, 999999.9)[is_internal]
+        delta = np.abs(inferred_internal_times - inferred_internal_times2).max()
+        print("delta", delta)
+        delta2 = inferred_times[ts.tables.edges.parent] - inferred_times[ts.tables.edges.child]
+        print("delta2", delta2.min())
 
     for k, v in baselines.items():
         if v.size == 1:
             print('[tsdate/anc] ' + k + ': {:.4f}'.format(v))
 
     pyro_metrics = {}
+    pyro_metrics['inferred_internal_times'] = inferred_internal_times
     pyro_metrics.update(compute_time_metrics(true_times[is_internal], inferred_internal_times))
 
     if 'inferred_internal_locations' in result:
@@ -107,7 +129,18 @@ def main(args):
         pyro_metrics.update(compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_times[is_internal]))
 
     for k, v in pyro_metrics.items():
-        print('[pyro-mig-{}] '.format(result['migration']) + k + ': {:.4f}'.format(v))
+        if v.size == 1:
+            print('[pyro-mig-{}] '.format(result['migration']) + k + ': {:.4f}'.format(v))
+
+    for k, v in baselines.items():
+        if v.size == 1:
+            pyro_metrics['tsdate_' + k] = v
+
+    pyro_metrics['tsdate_internal_times'] = baselines['tsdate_times'][is_internal]
+    pyro_metrics['true_internal_times'] = true_times[is_internal]
+
+    f = 'metrics/metrics.{}'.format(args.pkl.split('/')[-1])
+    pickle.dump(pyro_metrics, open(f, 'wb'))
 
 
 if __name__ == "__main__":

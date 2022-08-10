@@ -93,6 +93,10 @@ class NaiveModel(BaseModel):
         # fixed at zero.
         # Note this isn't a coalescent prior, but some are available at:
         # https://docs.pyro.ai/en/stable/_modules/pyro/distributions/coalescent.html
+        #log_Ne = pyro.param("log_Ne", torch.tensor(0.0))
+        #if torch.rand(1).item() < 0.003:
+        #    print("log_Ne",log_Ne.item())
+
         with pyro.plate("internal_nodes", self.num_internal):
             internal_time = pyro.sample(
                 "internal_time",
@@ -123,7 +127,7 @@ class NaiveModel(BaseModel):
             # TODO should we multiply this by e.g. 0.1
             prefactor, exponent = self.gap_prefactor, self.gap_exponent
             if exponent != 1.0:
-                pyro.factor("gap_constraint", prefactor * (gap - clamped_gap).pow(exponent))
+                pyro.factor("gap_constraint", -prefactor * (gap - clamped_gap).abs().clamp(min=1.0e-8).pow(exponent))
             else:
                 pyro.factor("gap_constraint", prefactor * (gap - clamped_gap))
 

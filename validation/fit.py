@@ -6,7 +6,7 @@ import pyro.distributions as dist
 from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
-from pyro.infer.autoguide import AutoNormal
+from pyro.infer.autoguide import AutoNormal, AutoDelta
 from pyro.optim import MultiStepLR, ClippedAdam
 from tspyro.ops import get_ancestral_geography
 
@@ -23,6 +23,7 @@ def fit_guide(
     migration_scale_init=1,
     milestones=None,
     gamma=0.2,
+    inference='svi',
     steps=1001,
     Model=NaiveModel,
     migration_likelihood=None,
@@ -82,9 +83,13 @@ def fit_guide(
             return torch.tensor(float(migration_scale_init), device=device)
         raise NotImplementedError("Missing init for {}".format(site["name"]))
 
-    guide = AutoNormal(
-        model, init_scale=0.01, init_loc_fn=init_loc_fn
-    )  # Mean field (fully Bayesian)
+    if inference == 'svi':
+        guide = AutoNormal(
+            model, init_scale=1.0e-2, init_loc_fn=init_loc_fn
+        )  # Mean field (fully Bayesian)
+    elif inference == 'map':
+        guide = AutoDelta(
+            model, init_loc_fn=init_loc_fn)
     unbound_guide = guide
 
     if scale_factor is None:
