@@ -11,6 +11,7 @@ from fit import fit_guide
 from models import euclidean_migration, marginal_euclidean_migration
 from analyze import compute_baselines
 from util import get_metadata, get_time_mask
+from models import NaiveModel, TimeDiffModel
 
 
 def load_data(args):
@@ -44,13 +45,15 @@ def main(args):
         init_times = ts.tables.nodes.time[is_internal]
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype(), device=device)
 
+    Model = NaiveModel if args.time == 'naive' else TimeDiffModel
+
     # Let's only infer times
     if args.migration == 'none':
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, Ne=args.Ne, mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma, init_times=init_times, device=device, inference=args.inference,
-            gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent)
+            gamma=args.gamma, init_times=init_times, device=device, inference=args.inference, Model=Model,
+            gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent, min_gap=args.min_gap)
 
     # Let's perform joint inference of time and location
     elif args.migration in ['euclidean', 'marginal_euclidean']:
@@ -81,10 +84,11 @@ def main(args):
     result['final_elbo'] = final_elbo
     result['migration'] = args.migration
 
-    tag = '{}.tcut{}.s{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.gap_{}_{}.{}.{}'
+    tag = '{}.tcut{}.s{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.gap_{}_{}_{}.{}.{}'
     tag = tag.format(args.migration, args.time_cutoff, args.seed, args.num_steps // 1000,
                      args.num_milestones, int(10 * args.gamma), args.time_init, int(1000 * args.init_lr),
-                     int(10 * args.gap_prefactor), int(10 * args.gap_exponent), args.inference, args.ts)
+                     int(10 * args.gap_prefactor), int(10 * args.gap_exponent), int(10 * args.min_gap),
+                     args.inference, args.ts)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
 
@@ -95,10 +99,10 @@ if __name__ == "__main__":
     default_ts = 'slim_2d_continuous_recapitated_mutated.down_200_0.trees'
     default_ts = 'msprime_N_2000_Ne_10000_L_20000000_REC_1e-8_MUT_1e-8_rep_11.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
-    parser.add_argument('--out', type=str, default='./bigtime/')
+    parser.add_argument('--out', type=str, default='./bigtimeclamp/')
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
-    parser.add_argument('--time', type=str, default='naive', choices=['naive'])
+    parser.add_argument('--time', type=str, default='naive', choices=['naive', 'diff'])
     parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map'])
     parser.add_argument('--init-lr', type=float, default=0.05)
@@ -106,11 +110,12 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--gap-prefactor', type=float, default=5.0)
-    parser.add_argument('--gap-exponent', type=float, default=0.5)
+    parser.add_argument('--gap-exponent', type=float, default=0.0)
+    parser.add_argument('--min-gap', type=float, default=1.0)
     parser.add_argument('--num-milestones', type=int, default=3)
     parser.add_argument('--Ne', type=int, default=10000)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=45 * 1000)
+    parser.add_argument('--num-steps', type=int, default=60 * 1000)
     parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()

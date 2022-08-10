@@ -25,6 +25,7 @@ class BaseModel(PyroModule):
         progress=False,
         gap_prefactor=1.0,
         gap_exponent=1.0,
+        min_gap=1.0,
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -38,6 +39,7 @@ class BaseModel(PyroModule):
 
         self.gap_prefactor = gap_prefactor
         self.gap_exponent = gap_exponent
+        self.min_gap = min_gap
 
         self.parent = torch.tensor(edges.parent, dtype=torch.long)
         self.child = torch.tensor(edges.child, dtype=torch.long)
@@ -123,11 +125,14 @@ class NaiveModel(BaseModel):
         gap = time[..., self.parent] - time[..., self.child]
         with pyro.plate("edges", gap.size(-1)):
             # Penalize gaps that are less than 1.
-            clamped_gap = gap.clamp(min=1)
+            clamped_gap = gap.clamp(min=self.min_gap)
             # TODO should we multiply this by e.g. 0.1
             prefactor, exponent = self.gap_prefactor, self.gap_exponent
-            if exponent != 1.0:
+            if exponent != 1.0 and exponent != 0.0:
                 pyro.factor("gap_constraint", -prefactor * (gap - clamped_gap).abs().clamp(min=1.0e-8).pow(exponent))
+            elif exponent == 0.0:
+                clamped_gap = gap.clamp(min=-1.0e-8)
+                pyro.factor("gap_constraint", -prefactor * (-gap + clamped_gap + 1.0).log())
             else:
                 pyro.factor("gap_constraint", prefactor * (gap - clamped_gap))
 

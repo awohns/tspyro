@@ -38,6 +38,7 @@ def fit_guide(
     num_eval_samples=500,
     gap_prefactor=1.0,
     gap_exponent=1.0,
+    min_gap=1.0,
 ):
     assert isinstance(Model, type)
 
@@ -53,9 +54,11 @@ def fit_guide(
         location_model=location_model,
         gap_prefactor=gap_prefactor,
         gap_exponent=gap_exponent,
+        min_gap=min_gap,
     )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale
+    prior_diff_loc = model.prior_diff_loc if hasattr(model, 'prior_diff_loc') else None
     model = model.to(device=device)
 
     def init_loc_fn(site):
@@ -67,7 +70,7 @@ def fit_guide(
                 internal_time = dist.LogNormal(prior_loc, prior_scale).mean.to(device=device)
             return internal_time.clamp(min=0.1)
         if site["name"] == "internal_diff":
-            internal_diff = model.prior_diff_loc.exp()
+            internal_diff = prior_diff_loc.exp()
             internal_diff.sub_(1).clamp_(min=0.1)
             return internal_diff
         # GEOGRAPHY.
@@ -114,7 +117,8 @@ def fit_guide(
     losses = []
     ts = [time.time()]
     migration_scales = []
-    last_internal_log_time = unbound_guide.median()['internal_time'].log().clone()
+    key_name = 'internal_time' if isinstance(Model, NaiveModel) else 'internal_diff'
+    last_internal_log_time = unbound_guide.median()[key_name].log().clone()
 
     for step in range(steps):
         loss = svi.step() / ts.num_nodes if scale_factor == 1.0 else svi.step()
@@ -136,8 +140,8 @@ def fit_guide(
                         migration_scale = pyro.param("migration_scale").item()
                     except:
                         migration_scale = None
-            time_conv_diagnostic = torch.abs(last_internal_log_time - median['internal_time'].log()).mean().item()
-            last_internal_log_time = median['internal_time'].log().clone()
+            time_conv_diagnostic = torch.abs(last_internal_log_time - median[key_name].log()).mean().item()
+            last_internal_log_time = median[key_name].log().clone()
             ips = 0.0 if step == 0 or steps <= log_every else log_every / (ts[-1] - ts[-1 - log_every])
             print(
                 f"step {step} loss = {loss:0.5g}, "
