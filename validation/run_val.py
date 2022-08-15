@@ -84,11 +84,11 @@ def main(args):
     result['final_elbo'] = final_elbo
     result['migration'] = args.migration
 
-    tag = '{}.tcut{}.s{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.gap_{}_{}_{}.{}.{}'
+    tag = '{}.tcut{}.s{}.numstep{}k.milestones{}_{}.tinit_{}.lr{}.gap_{}_{}_{}.{}.{}.{}'
     tag = tag.format(args.migration, args.time_cutoff, args.seed, args.num_steps // 1000,
                      args.num_milestones, int(10 * args.gamma), args.time_init, int(1000 * args.init_lr),
                      int(10 * args.gap_prefactor), int(10 * args.gap_exponent), int(10 * args.min_gap),
-                     args.inference, args.ts)
+                     args.inference, args.time, args.ts)
     f = args.out + 'result.{}.pkl'.format(tag)
     pickle.dump(result, open(f, 'wb'))
 
@@ -102,20 +102,20 @@ if __name__ == "__main__":
     parser.add_argument('--out', type=str, default='./bigtimeclamp/')
     parser.add_argument('--migration', type=str, default='none',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
-    parser.add_argument('--time', type=str, default='naive', choices=['naive', 'diff'])
+    parser.add_argument('--time', type=str, default='diff', choices=['naive', 'diff'])
     parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
-    parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map'])
-    parser.add_argument('--init-lr', type=float, default=0.05)
+    parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map', 'svilowrank'])
+    parser.add_argument('--init-lr', type=float, default=0.01)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.1)
-    parser.add_argument('--gap-prefactor', type=float, default=5.0)
-    parser.add_argument('--gap-exponent', type=float, default=0.0)
+    parser.add_argument('--gap-prefactor', type=float, default=10.0)
+    parser.add_argument('--gap-exponent', type=float, default=1.0)
     parser.add_argument('--min-gap', type=float, default=1.0)
-    parser.add_argument('--num-milestones', type=int, default=3)
+    parser.add_argument('--num-milestones', type=int, default=4)
     parser.add_argument('--Ne', type=int, default=10000)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=60 * 1000)
+    parser.add_argument('--num-steps', type=int, default=16 * 1000)
     parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()

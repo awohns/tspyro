@@ -94,6 +94,7 @@ def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baseline
 
 
 def main(args):
+    print("\n" + args.pkl)
     result = pickle.load(open(args.pkl, 'rb'))
 
     inferred_internal_times = result['inferred_internal_times']
@@ -109,11 +110,9 @@ def main(args):
         inferred_times = np.zeros(true_times.shape)
         inferred_times[is_internal] = inferred_internal_times
         inferred_internal_times2 = inferred_internal_times.copy()
-        inferred_internal_times = tsdate.core.constrain_ages_topo(ts, inferred_times, 999999.9)[is_internal]
+        inferred_internal_times = tsdate.core.constrain_ages_topo(ts, inferred_times, 0.1)[is_internal]
         delta = np.abs(inferred_internal_times - inferred_internal_times2).max()
-        print("delta", delta)
-        delta2 = inferred_times[ts.tables.edges.parent] - inferred_times[ts.tables.edges.child]
-        print("delta2", delta2.min())
+        #print("conc delta", delta)
 
     for k, v in baselines.items():
         if v.size == 1:

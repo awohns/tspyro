@@ -6,6 +6,7 @@ from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import (
     CummaxUpTree,
+    CumlogsumexpUpTree,
     edges_by_parent_asc,
     get_mut_edges,
     latlong_to_xyz,
@@ -175,11 +176,13 @@ class TimeDiffModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
+        self.scale_factor = kwargs.pop("scale_factor", 1.0)
         ts = args[0] if args else kwargs["ts"]
         super().__init__(*args, **kwargs)
         with torch.no_grad():
             # Initialize the prior time differences.
-            self.cumsum_up_tree = CummaxUpTree(ts)
+            self.cumsum_up_tree = CumlogsumexpUpTree(ts, scale_factor=self.scale_factor)
+            #self.cumsum_up_tree = CummaxUpTree(ts)
             time = torch.zeros(self.num_nodes)
             time[..., self.is_internal] = self.prior_loc.exp()
             diff = self.cumsum_up_tree.inverse(time).clamp(min=0.1)

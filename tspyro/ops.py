@@ -151,6 +151,9 @@ class CumlogsumexpUpTree(AccumulateUpTree):
     descendent is reachable along multiple paths, it will be summed multiple
     times, once per path.
     """
+    def __init__(self, ts: tskit.TreeSequence, scale_factor=1.0):
+        super().__init__(ts=ts)
+        self.scale_factor = scale_factor
 
     def _aggregate_children(self, child, parent, data, dim):
         """
@@ -166,13 +169,13 @@ class CumlogsumexpUpTree(AccumulateUpTree):
         max_child = scatter(
             child_data, parent, dim=dim, reduce="max", dim_size=data.shape[dim]
         )  # [N]
-        exp_child_data = (child_data - max_child[..., parent]).exp()  # [E]
+        exp_child_data = (self.scale_factor * (child_data - max_child[..., parent])).exp()  # [E]
         logsumexp_child = (
             max_child
             + torch.zeros_like(max_child).scatter_add(dim, parent, exp_child_data).log()
         )  # [N]
         assert logsumexp_child.shape == data.shape
-        return logsumexp_child
+        return logsumexp_child / self.scale_factor
 
 
 def radians_center_weighted(

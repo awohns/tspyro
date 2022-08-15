@@ -6,7 +6,7 @@ import pyro.distributions as dist
 from pyro import poutine
 from pyro.infer import SVI
 from pyro.infer import Trace_ELBO
-from pyro.infer.autoguide import AutoNormal, AutoDelta
+from pyro.infer.autoguide import AutoNormal, AutoDelta, AutoLowRankMultivariateNormal
 from pyro.optim import MultiStepLR, ClippedAdam
 from tspyro.ops import get_ancestral_geography
 
@@ -55,6 +55,7 @@ def fit_guide(
         gap_prefactor=gap_prefactor,
         gap_exponent=gap_exponent,
         min_gap=min_gap,
+        scale_factor=gap_exponent,
     )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale
@@ -90,6 +91,10 @@ def fit_guide(
         guide = AutoNormal(
             model, init_scale=1.0e-2, init_loc_fn=init_loc_fn
         )  # Mean field (fully Bayesian)
+    elif inference == 'svilowrank':
+        guide = AutoLowRankMultivariateNormal(
+            model, init_scale=1.0e-2, init_loc_fn=init_loc_fn, rank=200
+        )  # Mean field (fully Bayesian)
     elif inference == 'map':
         guide = AutoDelta(
             model, init_loc_fn=init_loc_fn)
@@ -117,7 +122,7 @@ def fit_guide(
     losses = []
     ts = [time.time()]
     migration_scales = []
-    key_name = 'internal_time' if isinstance(Model, NaiveModel) else 'internal_diff'
+    key_name = 'internal_time' if Model.__name__ == "NaiveModel" else 'internal_diff'
     last_internal_log_time = unbound_guide.median()[key_name].log().clone()
 
     for step in range(steps):
