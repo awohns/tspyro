@@ -2,6 +2,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 from pyro.nn import PyroModule
+import numpy as np
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import (
@@ -233,6 +234,18 @@ class TimeDiffModel(BaseModel):
 
         return time, gap, location, migration_scale
 
+
+class ConditionedTimesModel(NaiveModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        ts = kwargs["ts"]
+        dated = tsdate.date(ts, Ne=1000, mutation_rate=1e-8)
+        is_internal = ~np.array(ts.tables.nodes.flags & 1, dtype=bool)
+        self.internal_times = torch.as_tensor(dated.tables.nodes.time[is_internal],
+                                              dtype=torch.get_default_dtype())
+    def forward(self, *args, **kwargs):
+        with pyro.condition(data={"internal_time": self.internal_times,}):
+            return super().forward(*args, **kwargs)
 
 def mean_field_location():
     """
