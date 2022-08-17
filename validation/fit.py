@@ -116,7 +116,7 @@ def fit_guide(
                              'gamma': 0.2,
                              'milestones': milestones})
 
-    svi = SVI(model, guide, optim, Trace_ELBO())
+    svi = SVI(model, guide, optim, Trace_ELBO(num_particles=1, vectorize_particles=True, max_plate_nesting=1))
     guide()  # initialises the guide
 
     losses = []
