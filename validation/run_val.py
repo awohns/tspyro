@@ -8,7 +8,7 @@ import torch
 from pyro import poutine
 
 from fit import fit_guide
-from models import euclidean_migration, marginal_euclidean_migration
+from models import euclidean_migration, marginal_euclidean_migration, NaiveModel, ConditionedTimesModel
 from analyze import compute_baselines
 from util import get_metadata, get_time_mask
 from models import NaiveModel, TimeDiffModel
@@ -45,14 +45,14 @@ def main(args):
         init_times = ts.tables.nodes.time[is_internal]
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype(), device=device)
 
-    Model = NaiveModel if args.time == 'naive' else TimeDiffModel
+    Model = NaiveModel if args.time == 'naive' else ConditionedTimesModel
 
     # Let's only infer times
     if args.migration == 'none':
         inferred_times, _, _, guide, losses, final_elbo = fit_guide(
             ts, leaf_location=None, Ne=args.Ne, mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every,
-            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, migration_likelihood=None,
-            gamma=args.gamma, init_times=init_times, device=device, inference=args.inference, Model=Model,
+            learning_rate=args.init_lr, milestones=milestones, seed=args.seed, Model=Model, migration_likelihood=None,
+            gamma=args.gamma, init_times=init_times, device=device, inference=args.inference,
             gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent, min_gap=args.min_gap)
 
     # Let's perform joint inference of time and location
@@ -67,7 +67,7 @@ def main(args):
             ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
             mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
             learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
-            init_times=init_times, device=device, inference=args.inference,
+            Model=Model, init_times=init_times, device=device, inference=args.inference,
             gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent)
 
         inferred_internal_locations = inferred_locations[is_internal]
@@ -100,9 +100,9 @@ if __name__ == "__main__":
     default_ts = 'msprime_N_2000_Ne_10000_L_20000000_REC_1e-8_MUT_1e-8_rep_11.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./bigtimeclamp/')
-    parser.add_argument('--migration', type=str, default='none',
+    parser.add_argument('--migration', type=str, default='marginal_euclidean',
                         choices=['euclidean', 'marginal_euclidean', 'none'])
-    parser.add_argument('--time', type=str, default='diff', choices=['naive', 'diff'])
+    parser.add_argument('--time', type=str, default='conditioned', choices=['naive', 'diff', 'conditioned'])
     parser.add_argument('--time-init', type=str, default='prior', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map', 'svilowrank'])
     parser.add_argument('--init-lr', type=float, default=0.01)
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('--mu', type=float, default=1.0e-8)
     parser.add_argument('--num-steps', type=int, default=16 * 1000)
     parser.add_argument('--log-every', type=int, default=3000)
-    parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
+    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()
 
     if args.device == 'gpu':

@@ -14,7 +14,7 @@ from models import NaiveModel, mean_field_location
 
 
 def fit_guide(
-    ts,
+    tree_seq,
     leaf_location,
     init_times=None,
     init_loc=None,
@@ -45,18 +45,31 @@ def fit_guide(
     pyro.set_rng_seed(seed)
     pyro.clear_param_store()
 
-    model = Model(
-        ts=ts,
-        leaf_location=leaf_location,
-        Ne=Ne,
-        mutation_rate=mutation_rate,
-        migration_likelihood=migration_likelihood,
-        location_model=location_model,
-        gap_prefactor=gap_prefactor,
-        gap_exponent=gap_exponent,
-        min_gap=min_gap,
-        scale_factor=gap_exponent,
-    )
+    if scale_factor is not None:
+        model = Model(
+            ts=tree_seq,
+            leaf_location=leaf_location,
+            Ne=Ne,
+            mutation_rate=mutation_rate,
+            migration_likelihood=migration_likelihood,
+            location_model=location_model,
+            gap_prefactor=gap_prefactor,
+            gap_exponent=gap_exponent,
+            min_gap=min_gap,
+            scale_factor=gap_exponent,
+        )
+    else:
+        model = Model(
+            ts=tree_seq,
+            leaf_location=leaf_location,
+            Ne=Ne,
+            mutation_rate=mutation_rate,
+            migration_likelihood=migration_likelihood,
+            location_model=location_model,
+            gap_prefactor=gap_prefactor,
+            gap_exponent=gap_exponent,
+            min_gap=min_gap,
+        )
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale
     prior_diff_loc = model.prior_diff_loc if hasattr(model, 'prior_diff_loc') else None
@@ -79,7 +92,7 @@ def fit_guide(
             if init_loc is not None:
                 initial_guess_loc = init_loc
             else:
-                initial_guess_loc = get_ancestral_geography(ts, leaf_location.data.cpu().numpy()).to(device=device)
+                initial_guess_loc = get_ancestral_geography(tree_seq, leaf_location.data.cpu().numpy()).to(device=device)
             return initial_guess_loc
         if site["name"] == "internal_delta":
             return torch.zeros(site["fn"].shape())
@@ -101,7 +114,7 @@ def fit_guide(
     unbound_guide = guide
 
     if scale_factor is None:
-        scale_factor = 1.0 / ts.num_nodes
+        scale_factor = 1.0 / tree_seq.num_nodes
     if scale_factor != 1.0:
         guide = poutine.scale(guide, scale_factor)
         model = poutine.scale(model, scale_factor)
@@ -122,11 +135,18 @@ def fit_guide(
     losses = []
     ts = [time.time()]
     migration_scales = []
-    key_name = 'internal_time' if Model.__name__ == "NaiveModel" else 'internal_diff'
-    last_internal_log_time = unbound_guide.median()[key_name].log().clone()
+    if Model.__name__ == 'NaiveModel':
+        key_name = 'internal_time'
+        last_internal_log_time = unbound_guide.median()[key_name].log().clone()
+    elif Model.__name__ == 'TimeDiffModel':
+        key_name = 'internal_diff'
+        last_internal_log_time = unbound_guide.median()[key_name].log().clone()
+    elif Model.__name__ == 'ConditionedTimesModel':
+        key_name = 'pass'
+        last_internal_log_time = None
 
     for step in range(steps):
-        loss = svi.step() / ts.num_nodes if scale_factor == 1.0 else svi.step()
+        loss = svi.step() / tree_seq.num_nodes if scale_factor == 1.0 else svi.step()
         if milestones is not None:
             optim.step()
         ts.append(time.time())
@@ -145,8 +165,11 @@ def fit_guide(
                         migration_scale = pyro.param("migration_scale").item()
                     except:
                         migration_scale = None
-            time_conv_diagnostic = torch.abs(last_internal_log_time - median[key_name].log()).mean().item()
-            last_internal_log_time = median[key_name].log().clone()
+            if key_name != 'pass':
+                time_conv_diagnostic = torch.abs(last_internal_log_time - median[key_name].log()).mean().item()
+                last_internal_log_time = median[key_name].log().clone()
+            else:
+                time_conv_diagnostic = float('nan')
             ips = 0.0 if step == 0 or steps <= log_every else log_every / (ts[-1] - ts[-1 - log_every])
             print(
                 f"step {step} loss = {loss:0.5g}, "
