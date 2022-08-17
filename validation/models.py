@@ -115,6 +115,8 @@ class NaiveModel(BaseModel):
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,)).type_as(internal_time)
+        # Fix time of samples
+        time[..., self.is_leaf] = torch.tensor(self.ts.tables.nodes.time[self.is_leaf], dtype=torch.get_default_dtype())
         time[..., self.is_internal] = internal_time
 
         migration_scale = None
