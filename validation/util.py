@@ -8,7 +8,7 @@ def downsample_ts(filename, num_nodes, seed):
     np.random.seed(seed)
     random_sample = np.random.choice(np.arange(0, ts.num_samples), num_nodes, replace=False)
     sampled_ts = ts.simplify(samples=random_sample)
-    sampled_ts.dump(filename.split('.')[0] + '.down_{}_{}.trees'.format(num_nodes, seed))
+    sampled_ts.dump('.'.join(filename.split('.')[:-1]) + '.down_{}_{}.trees'.format(num_nodes, seed))
 
 
 def get_time_mask(ts, time_cutoff, times):

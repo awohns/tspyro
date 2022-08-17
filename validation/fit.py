@@ -45,31 +45,18 @@ def fit_guide(
     pyro.set_rng_seed(seed)
     pyro.clear_param_store()
 
-    if scale_factor is not None:
-        model = Model(
-            ts=tree_seq,
-            leaf_location=leaf_location,
-            Ne=Ne,
-            mutation_rate=mutation_rate,
-            migration_likelihood=migration_likelihood,
-            location_model=location_model,
-            gap_prefactor=gap_prefactor,
-            gap_exponent=gap_exponent,
-            min_gap=min_gap,
-            scale_factor=gap_exponent,
-        )
-    else:
-        model = Model(
-            ts=tree_seq,
-            leaf_location=leaf_location,
-            Ne=Ne,
-            mutation_rate=mutation_rate,
-            migration_likelihood=migration_likelihood,
-            location_model=location_model,
-            gap_prefactor=gap_prefactor,
-            gap_exponent=gap_exponent,
-            min_gap=min_gap,
-        )
+    model = Model(
+        ts=tree_seq,
+        leaf_location=leaf_location,
+        Ne=Ne,
+        mutation_rate=mutation_rate,
+        migration_likelihood=migration_likelihood,
+        location_model=location_model,
+        gap_prefactor=gap_prefactor,
+        gap_exponent=gap_exponent,
+        min_gap=min_gap,
+    )
+
     prior_loc = model.prior_loc
     prior_scale = model.prior_scale
     prior_diff_loc = model.prior_diff_loc if hasattr(model, 'prior_diff_loc') else None
@@ -141,7 +128,7 @@ def fit_guide(
     elif Model.__name__ == 'TimeDiffModel':
         key_name = 'internal_diff'
         last_internal_log_time = unbound_guide.median()[key_name].log().clone()
-    elif Model.__name__ == 'ConditionedTimesModel':
+    elif Model.__name__ == 'ConditionedTimesNaiveModel':
         key_name = 'pass'
         last_internal_log_time = None
 

@@ -292,7 +292,7 @@ def get_ancestral_geography(
     locations = np.zeros((ts.num_nodes, 2))
     locations[ts.samples()] = sample_locations
     fixed_nodes = set(ts.samples())
-    is_internal = ~torch.tensor((ts.tables.nodes.flags & 1).astype(bool), dtype=torch.bool)
+    is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
 
     # Iterate through the nodes via groupby on parent node
     for parent_edges in edges_by_parent_asc(ts):

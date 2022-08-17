@@ -90,6 +90,8 @@ class NaiveModel(BaseModel):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
         super().__init__(*args, **kwargs)
+        self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
+                                          dtype=torch.get_default_dtype())
 
     def forward(self):
         # First sample times from an improper uniform distribution which we denote
@@ -117,7 +119,7 @@ class NaiveModel(BaseModel):
         internal_time = internal_time  # * self.Ne
         time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,)).type_as(internal_time)
         # Fix time of samples
-        time[..., self.is_leaf] = torch.tensor(self.ts.tables.nodes.time[self.is_leaf], dtype=torch.get_default_dtype())
+        time[..., self.is_leaf] = self.leaf_times
         time[..., self.is_internal] = internal_time
 
         migration_scale = None
@@ -235,17 +237,16 @@ class TimeDiffModel(BaseModel):
         return time, gap, location, migration_scale
 
 
-class ConditionedTimesModel(NaiveModel):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        ts = kwargs["ts"]
-        dated = tsdate.date(ts, Ne=1000, mutation_rate=1e-8)
-        is_internal = ~np.array(ts.tables.nodes.flags & 1, dtype=bool)
-        self.internal_times = torch.as_tensor(dated.tables.nodes.time[is_internal],
+class ConditionedTimesNaiveModel(NaiveModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
+
     def forward(self, *args, **kwargs):
         with pyro.condition(data={"internal_time": self.internal_times,}):
             return super().forward(*args, **kwargs)
+
 
 def mean_field_location():
     """
