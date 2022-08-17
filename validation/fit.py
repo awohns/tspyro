@@ -129,8 +129,8 @@ def fit_guide(
         key_name = 'internal_diff'
         last_internal_log_time = unbound_guide.median()[key_name].log().clone()
     elif Model.__name__ == 'ConditionedTimesNaiveModel':
-        key_name = 'pass'
-        last_internal_log_time = None
+        key_name = 'internal_location'
+        last_internal_log_time = unbound_guide.median()[key_name].clone()
 
     for step in range(steps):
         loss = svi.step() / tree_seq.num_nodes if scale_factor == 1.0 else svi.step()
@@ -152,16 +152,17 @@ def fit_guide(
                         migration_scale = pyro.param("migration_scale").item()
                     except:
                         migration_scale = None
-            if key_name != 'pass':
-                time_conv_diagnostic = torch.abs(last_internal_log_time - median[key_name].log()).mean().item()
+            if 'location' not in key_name:
+                conv_diagnostic = torch.abs(last_internal_log_time - median[key_name].log()).mean().item()
                 last_internal_log_time = median[key_name].log().clone()
             else:
-                time_conv_diagnostic = float('nan')
+                conv_diagnostic = torch.abs(last_internal_log_time - median[key_name]).mean().item()
+                last_internal_log_time = median[key_name].clone()
             ips = 0.0 if step == 0 or steps <= log_every else log_every / (ts[-1] - ts[-1 - log_every])
             print(
                 f"step {step} loss = {loss:0.5g}, "
                 f"Migration scale = {migration_scale}, "
-                f"time conv. diagnostic = {time_conv_diagnostic:0.3g}, "
+                f"conv. diagnostic = {conv_diagnostic:0.3g}, "
                 f"iter. per sec. = {ips:0.2f}"
             )
 

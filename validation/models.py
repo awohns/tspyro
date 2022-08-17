@@ -255,27 +255,24 @@ class ConditionedTimesNaiveModel(BaseModel):
                 internal_location = self.location_model()
 
         migration_scale = None
-        if self.migration_likelihood is not None:
-            if self.migration_likelihood.__name__ == "euclidean_migration":
-                migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+        assert self.migration_likelihood is not None
+        if self.migration_likelihood.__name__ == "euclidean_migration":
+            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
 
         with pyro.plate("edges", self.parent.size(-1)):
-            if self.migration_likelihood is None:
-                location = torch.ones(self.ts.num_nodes)
-            else:
-                batch_shape = internal_location.shape[:-2]
-                location = torch.cat(
-                    [
-                        self.leaf_location.expand(batch_shape + (-1, -1)),
-                        internal_location,
-                    ],
-                    -2,
-                )
-                migration_scale = self.migration_likelihood(
-                    self.parent, self.child, migration_scale, self.times, location
-                )
-                if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
-                    pyro.get_param_store()['migration_scale'] = migration_scale.data
+            batch_shape = internal_location.shape[:-2]
+            location = torch.cat(
+                [
+                    self.leaf_location.expand(batch_shape + (-1, -1)),
+                    internal_location,
+                ],
+                -2,
+            )
+            migration_scale = self.migration_likelihood(
+                self.parent, self.child, migration_scale, self.times, location
+            )
+            if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
+                pyro.get_param_store()['migration_scale'] = migration_scale.data
 
         return self.times, None, location, migration_scale
 

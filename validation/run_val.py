@@ -11,7 +11,6 @@ from fit import fit_guide
 from models import euclidean_migration, marginal_euclidean_migration, NaiveModel, ConditionedTimesNaiveModel
 from analyze import compute_baselines
 from util import get_metadata, get_time_mask
-from models import TimeDiffModel
 
 
 def load_data(args):
@@ -98,7 +97,7 @@ if __name__ == "__main__":
     default_ts = 'slim_2d_Ne_2000_continuous_recapitated_length_1e8_mutated_mu_1e8_rep_1.trees'
     default_ts = 'slim_2d_continuous_recapitated_mutated.down_200_0.trees'
     default_ts = 'msprime_N_2000_Ne_10000_L_20000000_REC_1e-8_MUT_1e-8_rep_11.trees'
-    default_ts = 'ancients_medium.trees'
+    default_ts = 'ancients_big500.trees'
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--out', type=str, default='./space//')
     parser.add_argument('--migration', type=str, default='marginal_euclidean',
@@ -106,18 +105,18 @@ if __name__ == "__main__":
     parser.add_argument('--time', type=str, default='conditioned', choices=['naive', 'conditioned'])
     parser.add_argument('--time-init', type=str, default='tsdate', choices=['prior', 'tsdate', 'truth'])
     parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map', 'svilowrank'])
-    parser.add_argument('--init-lr', type=float, default=0.01)
+    parser.add_argument('--init-lr', type=float, default=0.1)
     parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.1)
+    parser.add_argument('--gamma', type=float, default=0.2)
     parser.add_argument('--gap-prefactor', type=float, default=10.0)
     parser.add_argument('--gap-exponent', type=float, default=1.0)
     parser.add_argument('--min-gap', type=float, default=1.0)
-    parser.add_argument('--num-milestones', type=int, default=3)
+    parser.add_argument('--num-milestones', type=int, default=5)
     parser.add_argument('--Ne', type=int, default=2000)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=24000)
-    parser.add_argument('--log-every', type=int, default=2000)
+    parser.add_argument('--num-steps', type=int, default=60000)
+    parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()
 
