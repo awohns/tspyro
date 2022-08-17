@@ -81,7 +81,7 @@ def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baseline
 
         tsdate_internal_times = tsdate_times[is_internal]
         metrics = {'tsdate_times': tsdate_times}
-        metrics.update(compute_time_metrics(true_times[is_internal], tsdate_internal_times))
+        #metrics.update(compute_time_metrics(true_times[is_internal], tsdate_internal_times))
 
         has_locations = np.isnan(locations).sum().item() < locations.size
         if has_locations:
@@ -120,7 +120,7 @@ def main(args):
 
     pyro_metrics = {}
     pyro_metrics['inferred_internal_times'] = inferred_internal_times
-    pyro_metrics.update(compute_time_metrics(true_times[is_internal], inferred_internal_times))
+    #pyro_metrics.update(compute_time_metrics(true_times[is_internal], inferred_internal_times))
 
     if 'inferred_internal_locations' in result:
         inferred_internal_locs = result['inferred_internal_locations']

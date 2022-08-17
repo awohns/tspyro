@@ -237,15 +237,47 @@ class TimeDiffModel(BaseModel):
         return time, gap, location, migration_scale
 
 
-class ConditionedTimesNaiveModel(NaiveModel):
+class ConditionedTimesNaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
+        self.migration_likelihood = kwargs.pop("migration_likelihood", None)
+        self.location_model = kwargs.pop("location_model", mean_field_location)
         super().__init__(*args, **kwargs)
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
+        self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
+                                          dtype=torch.get_default_dtype())
+        self.times = torch.as_tensor(self.ts.tables.nodes.time,
+                                          dtype=torch.get_default_dtype())
 
-    def forward(self, *args, **kwargs):
-        with pyro.condition(data={"internal_time": self.internal_times,}):
-            return super().forward(*args, **kwargs)
+    def forward(self):
+        with pyro.plate("internal_nodes", self.num_internal):
+            if self.leaf_location is not None:
+                internal_location = self.location_model()
+
+        migration_scale = None
+        if self.migration_likelihood is not None:
+            if self.migration_likelihood.__name__ == "euclidean_migration":
+                migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+
+        with pyro.plate("edges", self.parent.size(-1)):
+            if self.migration_likelihood is None:
+                location = torch.ones(self.ts.num_nodes)
+            else:
+                batch_shape = internal_location.shape[:-2]
+                location = torch.cat(
+                    [
+                        self.leaf_location.expand(batch_shape + (-1, -1)),
+                        internal_location,
+                    ],
+                    -2,
+                )
+                migration_scale = self.migration_likelihood(
+                    self.parent, self.child, migration_scale, self.times, location
+                )
+                if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
+                    pyro.get_param_store()['migration_scale'] = migration_scale.data
+
+        return self.times, None, location, migration_scale
 
 
 def mean_field_location():
