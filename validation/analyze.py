@@ -30,7 +30,7 @@ def compute_time_metrics(true_internal_times, inferred_internal_times):
     result['time_spearman'] = spearmanr(inferred_internal_times, true_internal_times)[0]
 
     median_time = np.median(true_internal_times)
-    recent, ancient = true_internal_times <= median_time, true_internal_times >= median_time
+    recent, ancient = true_internal_times <= median_time, true_internal_times > median_time
     result['time_rmsle_ancient'] = np.sqrt(mean_squared_log_error(inferred_internal_times[ancient], true_internal_times[ancient]))
     result['time_rmsle_recent'] = np.sqrt(mean_squared_log_error(inferred_internal_times[recent], true_internal_times[recent]))
     result['time_male_ancient'] = np.mean(np.abs(np.log(inferred_internal_times[ancient]) - np.log(true_internal_times[ancient])))
@@ -49,7 +49,7 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     result['spatial_mae'] = mae
 
     median_time = np.median(true_internal_times)
-    recent, ancient = true_internal_times <= median_time, true_internal_times >= median_time
+    recent, ancient = true_internal_times <= median_time, true_internal_times > median_time
     recent, ancient = recent & not_missing, ancient & not_missing
     rmse_ancient = np.sqrt(mean_squared_error(true_internal_locs[ancient], inferred_internal_locs[ancient]))
     rmse_recent = np.sqrt(mean_squared_error(true_internal_locs[recent], inferred_internal_locs[recent]))
@@ -117,7 +117,7 @@ def main(args):
 
     for k, v in baselines.items():
         if v.size == 1:
-            print('[tsdate/anc] ' + k + ': {:.4f}'.format(v))
+            print('[tsdate/anc] ' + k + ': {:.5f}'.format(v))
 
     pyro_metrics = {}
     pyro_metrics['inferred_internal_times'] = inferred_internal_times
@@ -130,7 +130,7 @@ def main(args):
 
     for k, v in pyro_metrics.items():
         if v.size == 1:
-            print('[pyro-mig-{}] '.format(result['migration']) + k + ': {:.4f}'.format(v))
+            print('[pyro-mig-{}] '.format(result['migration']) + k + ': {:.5f}'.format(v))
 
     for k, v in baselines.items():
         if v.size == 1:

@@ -35,16 +35,19 @@ def fit_guide(
     device=torch.device("cpu"),
     seed=0,
     scale_factor=None,
-    num_eval_samples=500,
+    num_eval_samples=50,
     gap_prefactor=1.0,
     gap_exponent=1.0,
     min_gap=1.0,
     num_particles=1,
+    time_mask=None,
 ):
     assert isinstance(Model, type)
 
     pyro.set_rng_seed(seed)
     pyro.clear_param_store()
+
+    heuristic_loc = get_ancestral_geography(tree_seq, leaf_location.data.cpu().numpy()).to(device=device)
 
     model = Model(
         ts=tree_seq,
@@ -56,6 +59,8 @@ def fit_guide(
         gap_prefactor=gap_prefactor,
         gap_exponent=gap_exponent,
         min_gap=min_gap,
+        time_mask=time_mask,
+        heuristic_loc=heuristic_loc
     )
 
     #prior_loc = model.prior_loc

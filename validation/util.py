@@ -1,6 +1,7 @@
 import tskit
 import numpy as np
 import torch
+import pyslim
 
 
 def downsample_ts(filename, num_nodes, seed):
@@ -11,9 +12,15 @@ def downsample_ts(filename, num_nodes, seed):
     sampled_ts.dump('.'.join(filename.split('.')[:-1]) + '.down_{}_{}.trees'.format(num_nodes, seed))
 
 
+def recap_ts(filename, ancestral_Ne):
+    ts = tskit.load(filename)
+    recapitated_ts = pyslim.recapitate(pyslim.update(ts), ancestral_Ne=ancestral_Ne)
+    recapitated_ts.dump('.'.join(filename.split('.')[:-1]) + '.recap.trees')
+
+
 def get_time_mask(ts, time_cutoff, times):
     # We restrict inference of locations to nodes within time_cutoff generations of the samples (which are all at time zero)
-    masked = times >= time_cutoff
+    masked = times > time_cutoff
     mask = torch.ones(ts.num_edges, dtype=torch.bool)
     for e, edge in enumerate(ts.edges()):
         if masked[edge.child]:

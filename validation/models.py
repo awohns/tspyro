@@ -13,6 +13,7 @@ from tspyro.ops import (
     latlong_to_xyz,
 )
 import tsdate
+from util import get_metadata
 
 
 class BaseModel(PyroModule):
@@ -244,18 +245,41 @@ class ConditionedTimesNaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
+        time_mask = kwargs.pop("time_mask", None)
+        heuristic_loc = kwargs.pop("heuristic_loc", None)
         super().__init__(*args, compute_time_prior=False, **kwargs)
+        self.time_mask = time_mask
+        self.heuristic_loc = heuristic_loc
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
+        self.time_mask2 = self.internal_times > 100.0
         self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
                                           dtype=torch.get_default_dtype())
         self.times = torch.as_tensor(self.ts.tables.nodes.time,
-                                          dtype=torch.get_default_dtype())
+                                     dtype=torch.get_default_dtype())
+
+        true_locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=torch.get_default_dtype())
+        bins = [0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+        print("[Empirical migration scales]")
+        for left, right in zip(bins[:-1], bins[1:]):
+            gap = self.times[..., self.parent] - self.times[..., self.child]  # in units of generations
+            gap = gap.clamp(min=1.0)
+            parent_location = true_locations.index_select(-2, self.parent)  # num_particles num_edges 2
+            child_location = true_locations.index_select(-2, self.child)
+            delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
+            time_mask = (self.times[self.parent] >= left) & (self.times[self.parent] < right) \
+                & (~delta_loc_sq.isnan())
+            delta_loc_sq[delta_loc_sq.isnan()] = 0.0
+
+            scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / time_mask.sum().item()
+            print("[{}, {}] \t scale: {:.4f}   num_edges: {}".format(int(left), int(right), scale,
+                                                                  int(time_mask.sum().item())))
 
     def forward(self):
         with pyro.plate("internal_nodes", self.num_internal):
             if self.leaf_location is not None:
                 internal_location = self.location_model()
+                internal_location[..., self.time_mask2, :] = self.heuristic_loc[self.time_mask2, :]
 
         migration_scale = None
         assert self.migration_likelihood is not None
@@ -272,7 +296,7 @@ class ConditionedTimesNaiveModel(BaseModel):
                 -2,
             )
             migration_scale = self.migration_likelihood(
-                self.parent, self.child, migration_scale, self.times, location
+                self.parent, self.child, migration_scale, self.times, location, self.time_mask
             )
             if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
                 pyro.get_param_store()['migration_scale'] = migration_scale.data
@@ -355,21 +379,21 @@ class ReparamLocation:
         return internal_location
 
 
-def marginal_euclidean_migration(parent, child, migration_scale, time, location):
+def marginal_euclidean_migration(parent, child, migration_scale, time, location, time_mask):
     """
     """
     gap = time[..., parent] - time[..., child]  # in units of generations
-    gap = gap.clamp(
-        min=1
-    )  # avoid incorrect ordering of parents/children due to unconstrained
-    parent_location = location.index_select(-2, parent)
+    gap = gap.clamp(min=1)  # num_edges
+    num_observed_pairs = time_mask.sum().item()
+    parent_location = location.index_select(-2, parent)  # num_particles num_edges 2
     child_location = location.index_select(-2, child)
-    delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)
-    migration_scale = (delta_loc_sq / gap).mean().sqrt()
+    delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
+    migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
+    migration_scale_gap = gap.sqrt() *  migration_scale
 
     pyro.sample(
         "migration",
-        dist.Normal(parent_location, migration_scale[..., None]).to_event(1),
+        dist.Normal(parent_location, migration_scale_gap.unsqueeze(-1)).to_event(1),
         obs=child_location,
     )
 

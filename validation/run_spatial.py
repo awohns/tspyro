@@ -33,12 +33,14 @@ def main(args):
         print("optim milestones: ", milestones)
 
     locations, true_times, is_leaf, is_internal = get_metadata(ts)
+
     device = 'cpu' if args.device == 'cpu' else 'cuda'
 
     if args.time_init == 'tsdate':
-        raise NotImplementedError
+        #raise NotImplementedError
         init_times = compute_baselines(args.ts, Ne=args.Ne, mu=args.mu)[0]['tsdate_times'][is_internal]
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype(), device=device)
+        time_mask = get_time_mask(ts, args.time_cutoff, init_times)
     elif args.time_init == 'truth':
         true_times = ts.tables.nodes.time
         true_times = torch.from_numpy(true_times).to(dtype=torch.get_default_dtype(), device=device)
@@ -55,7 +57,8 @@ def main(args):
         mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
         learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
         Model=ConditionedTimesNaiveModel, init_times=init_times, device=device, inference=args.inference,
-        gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent, num_particles=args.num_particles)
+        gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent, num_particles=args.num_particles,
+        time_mask=time_mask)
 
     inferred_internal_locations = inferred_locations[is_internal]
 
@@ -85,12 +88,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
 
     default_ts = \
-        ['slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_70_rep_1.trees',
-    'slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_7_rep_1.trees',
-    'slim_cont_nocomp_N_2e4_Ne_8.5e3_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_79_rep_1.trees',
-    'slim_cont_nocomp_N_2e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8e4_ancs_790_rep_1.trees']
+        ['slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_70_rep_1.recap.trees',
+    'slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_7_rep_1.recap.trees',
+    'slim_cont_nocomp_N_2e4_Ne_8.5e3_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_79_rep_1.recap.trees',
+    'slim_cont_nocomp_N_2e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8e4_ancs_790_rep_1.recap.trees']
     default_ne = [10000, 10000, 8500, 10000]
-    which = 0
+    which = 3
     default_ts = default_ts[which]
     default_ne = default_ne[which]
 
@@ -100,19 +103,19 @@ if __name__ == "__main__":
                         choices=['euclidean', 'marginal_euclidean'])
     parser.add_argument('--time-init', type=str, default='truth', choices=['tsdate', 'truth'])
     parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map', 'svilowrank'])
-    parser.add_argument('--init-lr', type=float, default=0.1)
-    parser.add_argument('--time-cutoff', type=float, default=100.0)
+    parser.add_argument('--init-lr', type=float, default=0.05)
+    parser.add_argument('--time-cutoff', type=float, default=500.0)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--gamma', type=float, default=0.2)
+    parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--gap-prefactor', type=float, default=1.0)
     parser.add_argument('--gap-exponent', type=float, default=1.0)
     parser.add_argument('--min-gap', type=float, default=1.0)
-    parser.add_argument('--num-milestones', type=int, default=5)
+    parser.add_argument('--num-milestones', type=int, default=4)
     parser.add_argument('--Ne', type=int, default=default_ne)
     parser.add_argument('--mu', type=float, default=1.0e-8)
-    parser.add_argument('--num-steps', type=int, default=600)
-    parser.add_argument('--num-particles', type=int, default=8)
-    parser.add_argument('--log-every', type=int, default=30)
+    parser.add_argument('--num-steps', type=int, default=25 * 1000)
+    parser.add_argument('--num-particles', type=int, default=4)
+    parser.add_argument('--log-every', type=int, default=2500)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()
 
