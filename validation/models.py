@@ -28,6 +28,7 @@ class BaseModel(PyroModule):
         gap_prefactor=1.0,
         gap_exponent=1.0,
         min_gap=1.0,
+        compute_time_prior=True
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -55,6 +56,10 @@ class BaseModel(PyroModule):
         self.penalty = float(penalty)
         self.Ne = float(Ne)
         self.mutation_rate = mutation_rate
+        self.leaf_location = leaf_location
+
+        if not compute_time_prior:
+            return
 
         # conditional coalescent prior
         nodes_to_date = (~self.is_leaf).data.cpu().numpy()
@@ -81,8 +86,6 @@ class BaseModel(PyroModule):
         self.prior_loc = torch.tensor(
                 prior_params[nodes_to_date, 0], dtype=torch.get_default_dtype()
             )
-
-        self.leaf_location = leaf_location
 
 
 class NaiveModel(BaseModel):
@@ -241,7 +244,7 @@ class ConditionedTimesNaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, compute_time_prior=False, **kwargs)
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
         self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],

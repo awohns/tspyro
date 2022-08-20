@@ -39,6 +39,7 @@ def fit_guide(
     gap_prefactor=1.0,
     gap_exponent=1.0,
     min_gap=1.0,
+    num_particles=1,
 ):
     assert isinstance(Model, type)
 
@@ -57,9 +58,9 @@ def fit_guide(
         min_gap=min_gap,
     )
 
-    prior_loc = model.prior_loc
-    prior_scale = model.prior_scale
-    prior_diff_loc = model.prior_diff_loc if hasattr(model, 'prior_diff_loc') else None
+    #prior_loc = model.prior_loc
+    #prior_scale = model.prior_scale
+    #prior_diff_loc = model.prior_diff_loc if hasattr(model, 'prior_diff_loc') else None
     model = model.to(device=device)
 
     def init_loc_fn(site):
@@ -116,7 +117,8 @@ def fit_guide(
                              'gamma': 0.2,
                              'milestones': milestones})
 
-    svi = SVI(model, guide, optim, Trace_ELBO(num_particles=1, vectorize_particles=True, max_plate_nesting=1))
+    svi = SVI(model, guide, optim, Trace_ELBO(num_particles=num_particles,
+                                              vectorize_particles=True, max_plate_nesting=1))
     guide()  # initialises the guide
 
     losses = []

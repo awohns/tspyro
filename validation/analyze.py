@@ -30,13 +30,13 @@ def compute_time_metrics(true_internal_times, inferred_internal_times):
     result['time_spearman'] = spearmanr(inferred_internal_times, true_internal_times)[0]
 
     median_time = np.median(true_internal_times)
-    early, late = true_internal_times <= median_time, true_internal_times >= median_time
-    result['time_rmsle_late'] = np.sqrt(mean_squared_log_error(inferred_internal_times[late], true_internal_times[late]))
-    result['time_rmsle_early'] = np.sqrt(mean_squared_log_error(inferred_internal_times[early], true_internal_times[early]))
-    result['time_male_late'] = np.mean(np.abs(np.log(inferred_internal_times[late]) - np.log(true_internal_times[late])))
-    result['time_male_early'] = np.mean(np.abs(np.log(inferred_internal_times[early]) - np.log(true_internal_times[early])))
-    result['time_log_bias_late'] = np.mean(np.log(inferred_internal_times[late]) - np.log(true_internal_times[late]))
-    result['time_log_bias_early'] = np.mean(np.log(inferred_internal_times[early]) - np.log(true_internal_times[early]))
+    recent, ancient = true_internal_times <= median_time, true_internal_times >= median_time
+    result['time_rmsle_ancient'] = np.sqrt(mean_squared_log_error(inferred_internal_times[ancient], true_internal_times[ancient]))
+    result['time_rmsle_recent'] = np.sqrt(mean_squared_log_error(inferred_internal_times[recent], true_internal_times[recent]))
+    result['time_male_ancient'] = np.mean(np.abs(np.log(inferred_internal_times[ancient]) - np.log(true_internal_times[ancient])))
+    result['time_male_recent'] = np.mean(np.abs(np.log(inferred_internal_times[recent]) - np.log(true_internal_times[recent])))
+    result['time_log_bias_ancient'] = np.mean(np.log(inferred_internal_times[ancient]) - np.log(true_internal_times[ancient]))
+    result['time_log_bias_recent'] = np.mean(np.log(inferred_internal_times[recent]) - np.log(true_internal_times[recent]))
     return result
 
 
@@ -49,16 +49,16 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     result['spatial_mae'] = mae
 
     median_time = np.median(true_internal_times)
-    early, late = true_internal_times <= median_time, true_internal_times >= median_time
-    early, late = early & not_missing, late & not_missing
-    rmse_late = np.sqrt(mean_squared_error(true_internal_locs[late], inferred_internal_locs[late]))
-    rmse_early = np.sqrt(mean_squared_error(true_internal_locs[early], inferred_internal_locs[early]))
-    mae_late = np.sqrt(np.power(true_internal_locs[late] - inferred_internal_locs[late], 2).sum(-1)).mean()
-    mae_early = np.sqrt(np.power(true_internal_locs[early] - inferred_internal_locs[early], 2).sum(-1)).mean()
-    result['spatial_rmse_late'] = rmse_late
-    result['spatial_rmse_early'] = rmse_early
-    result['spatial_mae_late'] = mae_late
-    result['spatial_mae_early'] = mae_early
+    recent, ancient = true_internal_times <= median_time, true_internal_times >= median_time
+    recent, ancient = recent & not_missing, ancient & not_missing
+    rmse_ancient = np.sqrt(mean_squared_error(true_internal_locs[ancient], inferred_internal_locs[ancient]))
+    rmse_recent = np.sqrt(mean_squared_error(true_internal_locs[recent], inferred_internal_locs[recent]))
+    mae_ancient = np.sqrt(np.power(true_internal_locs[ancient] - inferred_internal_locs[ancient], 2).sum(-1)).mean()
+    mae_recent = np.sqrt(np.power(true_internal_locs[recent] - inferred_internal_locs[recent], 2).sum(-1)).mean()
+    result['spatial_rmse_ancient'] = rmse_ancient
+    result['spatial_rmse_recent'] = rmse_recent
+    result['spatial_mae_ancient'] = mae_ancient
+    result['spatial_mae_recent'] = mae_recent
     return result
 
 
@@ -70,8 +70,9 @@ def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baseline
     if exists(f):
         metrics = pickle.load(open(f, 'rb'))
     else:  # else compute baseline metrics
-        dated_ts = tsdate.date(ts, mutation_rate=mu, Ne=Ne)
-        tsdate_times = dated_ts.tables.nodes.time
+        #dated_ts = tsdate.date(ts, mutation_rate=mu, Ne=Ne)
+        #tsdate_times = dated_ts.tables.nodes.time
+        tsdate_times = ts.tables.nodes.time
 
         #unconstrained_inferred_times = np.zeros(dated_ts.num_nodes)
         #for node in dated_ts.nodes():
