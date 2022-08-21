@@ -40,7 +40,8 @@ def compute_time_metrics(true_internal_times, inferred_internal_times):
     return result
 
 
-def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_internal_times):
+def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_internal_times,
+                            time_cutoff, baseline=True):
     result = {}
     not_missing = ~np.isnan(true_internal_locs)[:, 0]
     rmse = np.sqrt(mean_squared_error(true_internal_locs[not_missing], inferred_internal_locs[not_missing]))
@@ -48,8 +49,7 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     result['spatial_rmse'] = rmse
     result['spatial_mae'] = mae
 
-    median_time = np.median(true_internal_times)
-    recent, ancient = true_internal_times <= median_time, true_internal_times > median_time
+    recent, ancient = true_internal_times <= time_cutoff, true_internal_times > time_cutoff
     recent, ancient = recent & not_missing, ancient & not_missing
     rmse_ancient = np.sqrt(mean_squared_error(true_internal_locs[ancient], inferred_internal_locs[ancient]))
     rmse_recent = np.sqrt(mean_squared_error(true_internal_locs[recent], inferred_internal_locs[recent]))
@@ -59,10 +59,29 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
     result['spatial_rmse_recent'] = rmse_recent
     result['spatial_mae_ancient'] = mae_ancient
     result['spatial_mae_recent'] = mae_recent
+
+    bins = np.linspace(0.0, time_cutoff, int((time_cutoff / 25.0)) + 1)
+    print("bins =", bins)
+    maes = []
+    rmses = []
+    for left, right in zip(bins[:-1], bins[1:]):
+        mask = (true_internal_times >= left) & (true_internal_times < right) & not_missing
+        rmse = np.sqrt(mean_squared_error(true_internal_locs[mask], inferred_internal_locs[mask]))
+        rmses.append(rmse)
+        mae = np.sqrt(np.power(true_internal_locs[mask] - inferred_internal_locs[mask], 2).sum(-1)).mean()
+        maes.append(mae)
+
+    if baseline:
+        print("baseline_maes =", maes)
+        print("baseline_rmses =", rmses)
+    else:
+        print("tspyro_maes =", maes)
+        print("tspyro_rmses =", rmses)
+
     return result
 
 
-def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baselines/'):
+def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, time_cutoff=100.0, baselines_dir='./baselines/'):
     ts = load_data(ts_filename)
     locations, true_times, is_leaf, is_internal = get_metadata(ts)
 
@@ -87,7 +106,8 @@ def compute_baselines(ts_filename, Ne=None, mu=1.0e-8, baselines_dir='./baseline
         has_locations = np.isnan(locations).sum().item() < locations.size
         if has_locations:
             ancestral_locs = get_ancestral_geography(ts, locations[is_leaf]).data.cpu().numpy()
-            metrics.update(compute_spatial_metrics(locations[is_internal], ancestral_locs, true_times[is_internal]))
+            metrics.update(compute_spatial_metrics(locations[is_internal], ancestral_locs, true_times[is_internal],
+                                                   time_cutoff))
 
         pickle.dump(metrics, open(f, 'wb'))
 
@@ -100,13 +120,15 @@ def main(args):
 
     inferred_internal_times = result['inferred_internal_times']
     ts_filename = result['ts_filename']
+    time_cutoff = result['time_cutoff']
 
     Ne = result['Ne']
     mu = result['mu']
 
     print("final_elbo: {:.4f}".format(result['final_elbo']))
 
-    baselines, locations, true_times, is_leaf, is_internal = compute_baselines(ts_filename, Ne=Ne, mu=mu)
+    baselines, locations, true_times, is_leaf, is_internal = \
+        compute_baselines(ts_filename, Ne=Ne, mu=mu, time_cutoff=time_cutoff)
     if False:
         inferred_times = np.zeros(true_times.shape)
         inferred_times[is_internal] = inferred_internal_times
@@ -126,7 +148,8 @@ def main(args):
     if 'inferred_internal_locations' in result:
         inferred_internal_locs = result['inferred_internal_locations']
         true_internal_locs = locations[is_internal]
-        pyro_metrics.update(compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_times[is_internal]))
+        pyro_metrics.update(compute_spatial_metrics(true_internal_locs, inferred_internal_locs,
+                            true_times[is_internal], time_cutoff, baseline=False))
 
     for k, v in pyro_metrics.items():
         if v.size == 1:

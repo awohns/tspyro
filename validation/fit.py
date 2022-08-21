@@ -41,6 +41,7 @@ def fit_guide(
     min_gap=1.0,
     num_particles=1,
     time_mask=None,
+    time_cutoff=100.0,
 ):
     assert isinstance(Model, type)
 
@@ -60,7 +61,8 @@ def fit_guide(
         gap_exponent=gap_exponent,
         min_gap=min_gap,
         time_mask=time_mask,
-        heuristic_loc=heuristic_loc
+        heuristic_loc=heuristic_loc,
+        time_cutoff=time_cutoff
     )
 
     #prior_loc = model.prior_loc

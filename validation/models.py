@@ -24,7 +24,6 @@ class BaseModel(PyroModule):
         Ne,
         leaf_location=None,
         mutation_rate=1e-8,
-        penalty=100.0,
         progress=False,
         gap_prefactor=1.0,
         gap_exponent=1.0,
@@ -54,7 +53,6 @@ class BaseModel(PyroModule):
             get_mut_edges(self.ts), dtype=torch.get_default_dtype()
         )  # this is an int, but we optimise with float for pytorch
 
-        self.penalty = float(penalty)
         self.Ne = float(Ne)
         self.mutation_rate = mutation_rate
         self.leaf_location = leaf_location
@@ -246,20 +244,21 @@ class ConditionedTimesNaiveModel(BaseModel):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
         time_mask = kwargs.pop("time_mask", None)
+        self.time_cutoff = kwargs.pop("time_cutoff", 100.0)
         heuristic_loc = kwargs.pop("heuristic_loc", None)
         super().__init__(*args, compute_time_prior=False, **kwargs)
         self.time_mask = time_mask
         self.heuristic_loc = heuristic_loc
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
-        self.time_mask2 = self.internal_times > 100.0
+        self.internal_time_mask = self.internal_times > self.time_cutoff
         self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
                                           dtype=torch.get_default_dtype())
         self.times = torch.as_tensor(self.ts.tables.nodes.time,
                                      dtype=torch.get_default_dtype())
 
         true_locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=torch.get_default_dtype())
-        bins = [0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+        bins = [0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0]
         print("[Empirical migration scales]")
         for left, right in zip(bins[:-1], bins[1:]):
             gap = self.times[..., self.parent] - self.times[..., self.child]  # in units of generations
@@ -277,9 +276,8 @@ class ConditionedTimesNaiveModel(BaseModel):
 
     def forward(self):
         with pyro.plate("internal_nodes", self.num_internal):
-            if self.leaf_location is not None:
-                internal_location = self.location_model()
-                internal_location[..., self.time_mask2, :] = self.heuristic_loc[self.time_mask2, :]
+            internal_location = self.location_model()
+            internal_location[..., self.internal_time_mask, :] = self.heuristic_loc[self.internal_time_mask, :]
 
         migration_scale = None
         assert self.migration_likelihood is not None
@@ -384,12 +382,15 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location,
     """
     gap = time[..., parent] - time[..., child]  # in units of generations
     gap = gap.clamp(min=1)  # num_edges
-    num_observed_pairs = time_mask.sum().item()
     parent_location = location.index_select(-2, parent)  # num_particles num_edges 2
     child_location = location.index_select(-2, child)
-    delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
-    migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
-    migration_scale_gap = gap.sqrt() *  migration_scale
+    if 1:
+        num_observed_pairs = time_mask.sum().item()
+        delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
+        migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
+    else:
+        migration_scale = torch.tensor(0.3)
+    migration_scale_gap = gap.sqrt() * migration_scale
 
     pyro.sample(
         "migration",
