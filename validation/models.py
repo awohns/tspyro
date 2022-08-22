@@ -2,15 +2,18 @@ import pyro
 import pyro.distributions as dist
 import torch
 from pyro.nn import PyroModule
+import numpy as np
 from tspyro.diffusion import ApproximateMatrixExponential
 from tspyro.diffusion import WaypointDiffusion2D
 from tspyro.ops import (
     CummaxUpTree,
+    CumlogsumexpUpTree,
     edges_by_parent_asc,
     get_mut_edges,
     latlong_to_xyz,
 )
 import tsdate
+from util import get_metadata
 
 
 class BaseModel(PyroModule):
@@ -21,8 +24,11 @@ class BaseModel(PyroModule):
         Ne,
         leaf_location=None,
         mutation_rate=1e-8,
-        penalty=100.0,
         progress=False,
+        gap_prefactor=1.0,
+        gap_exponent=1.0,
+        min_gap=1.0,
+        compute_time_prior=True
     ):
         super().__init__()
         nodes = ts.tables.nodes
@@ -34,6 +40,10 @@ class BaseModel(PyroModule):
 
         self.ts = ts
 
+        self.gap_prefactor = gap_prefactor
+        self.gap_exponent = gap_exponent
+        self.min_gap = min_gap
+
         self.parent = torch.tensor(edges.parent, dtype=torch.long)
         self.child = torch.tensor(edges.child, dtype=torch.long)
         self.span = torch.tensor(
@@ -43,12 +53,15 @@ class BaseModel(PyroModule):
             get_mut_edges(self.ts), dtype=torch.get_default_dtype()
         )  # this is an int, but we optimise with float for pytorch
 
-        self.penalty = float(penalty)
         self.Ne = float(Ne)
         self.mutation_rate = mutation_rate
+        self.leaf_location = leaf_location
+
+        if not compute_time_prior:
+            return
 
         # conditional coalescent prior
-        nodes_to_date = ~self.is_leaf
+        nodes_to_date = (~self.is_leaf).data.cpu().numpy()
         span_data = tsdate.prior.SpansBySamples(ts, progress=progress)
         approximate_prior_size = 1000
         prior_distribution = "lognorm"
@@ -73,8 +86,6 @@ class BaseModel(PyroModule):
                 prior_params[nodes_to_date, 0], dtype=torch.get_default_dtype()
             )
 
-        self.leaf_location = leaf_location
-
 
 class NaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
@@ -82,6 +93,8 @@ class NaiveModel(BaseModel):
         self.location_model = kwargs.pop("location_model", mean_field_location)
         self.poisson_likelihood = kwargs.pop("poisson_likelihood", True)
         super().__init__(*args, **kwargs)
+        self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
+                                          dtype=torch.get_default_dtype())
 
     def forward(self):
         # First sample times from an improper uniform distribution which we denote
@@ -89,6 +102,10 @@ class NaiveModel(BaseModel):
         # fixed at zero.
         # Note this isn't a coalescent prior, but some are available at:
         # https://docs.pyro.ai/en/stable/_modules/pyro/distributions/coalescent.html
+        #log_Ne = pyro.param("log_Ne", torch.tensor(0.0))
+        #if torch.rand(1).item() < 0.003:
+        #    print("log_Ne",log_Ne.item())
+
         with pyro.plate("internal_nodes", self.num_internal):
             internal_time = pyro.sample(
                 "internal_time",
@@ -103,7 +120,9 @@ class NaiveModel(BaseModel):
         # Note optimizers prefer numbers around 1, so we scale after the pyro.sample
         # statement, rather than in the distribution.
         internal_time = internal_time  # * self.Ne
-        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,))
+        time = torch.zeros(internal_time.shape[:-1] + (self.num_nodes,)).type_as(internal_time)
+        # Fix time of samples
+        time[..., self.is_leaf] = self.leaf_times
         time[..., self.is_internal] = internal_time
 
         migration_scale = None
@@ -115,9 +134,16 @@ class NaiveModel(BaseModel):
         gap = time[..., self.parent] - time[..., self.child]
         with pyro.plate("edges", gap.size(-1)):
             # Penalize gaps that are less than 1.
-            clamped_gap = gap.clamp(min=1)
+            clamped_gap = gap.clamp(min=self.min_gap)
             # TODO should we multiply this by e.g. 0.1
-            pyro.factor("gap_constraint", gap - clamped_gap)
+            prefactor, exponent = self.gap_prefactor, self.gap_exponent
+            if exponent != 1.0 and exponent != 0.0:
+                pyro.factor("gap_constraint", -prefactor * (gap - clamped_gap).abs().clamp(min=1.0e-8).pow(exponent))
+            elif exponent == 0.0:
+                clamped_gap = gap.clamp(min=-1.0e-8)
+                pyro.factor("gap_constraint", -prefactor * (-gap + clamped_gap + 1.0).log())
+            else:
+                pyro.factor("gap_constraint", prefactor * (gap - clamped_gap))
 
             rate = (clamped_gap * self.span * self.mutation_rate).clamp(min=1e-8)
             if self.poisson_likelihood:
@@ -170,11 +196,13 @@ class TimeDiffModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
         self.location_model = kwargs.pop("location_model", mean_field_location)
+        self.scale_factor = kwargs.pop("scale_factor", 1.0)
         ts = args[0] if args else kwargs["ts"]
         super().__init__(*args, **kwargs)
         with torch.no_grad():
             # Initialize the prior time differences.
-            self.cumsum_up_tree = CummaxUpTree(ts)
+            self.cumsum_up_tree = CumlogsumexpUpTree(ts, scale_factor=self.scale_factor)
+            #self.cumsum_up_tree = CummaxUpTree(ts)
             time = torch.zeros(self.num_nodes)
             time[..., self.is_internal] = self.prior_loc.exp()
             diff = self.cumsum_up_tree.inverse(time).clamp(min=0.1)
@@ -222,6 +250,69 @@ class TimeDiffModel(BaseModel):
                 )
 
         return time, gap, location, migration_scale
+
+
+class ConditionedTimesNaiveModel(BaseModel):
+    def __init__(self, *args, **kwargs):
+        self.migration_likelihood = kwargs.pop("migration_likelihood", None)
+        self.location_model = kwargs.pop("location_model", mean_field_location)
+        time_mask = kwargs.pop("time_mask", None)
+        self.time_cutoff = kwargs.pop("time_cutoff", 100.0)
+        heuristic_loc = kwargs.pop("heuristic_loc", None)
+        super().__init__(*args, compute_time_prior=False, **kwargs)
+        self.time_mask = time_mask
+        self.heuristic_loc = heuristic_loc
+        self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
+                                              dtype=torch.get_default_dtype())
+        self.internal_time_mask = self.internal_times > self.time_cutoff
+        self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
+                                          dtype=torch.get_default_dtype())
+        self.times = torch.as_tensor(self.ts.tables.nodes.time,
+                                     dtype=torch.get_default_dtype())
+
+        true_locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=torch.get_default_dtype())
+        bins = [0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0]
+        print("[Empirical migration scales]")
+        for left, right in zip(bins[:-1], bins[1:]):
+            gap = self.times[..., self.parent] - self.times[..., self.child]  # in units of generations
+            gap = gap.clamp(min=1.0)
+            parent_location = true_locations.index_select(-2, self.parent)  # num_particles num_edges 2
+            child_location = true_locations.index_select(-2, self.child)
+            delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
+            time_mask = (self.times[self.parent] >= left) & (self.times[self.parent] < right) \
+                & (~delta_loc_sq.isnan())
+            delta_loc_sq[delta_loc_sq.isnan()] = 0.0
+
+            scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / time_mask.sum().item()
+            print("[{}, {}] \t scale: {:.4f}   num_edges: {}".format(int(left), int(right), scale,
+                                                                  int(time_mask.sum().item())))
+
+    def forward(self):
+        with pyro.plate("internal_nodes", self.num_internal):
+            internal_location = self.location_model()
+            internal_location[..., self.internal_time_mask, :] = self.heuristic_loc[self.internal_time_mask, :]
+
+        migration_scale = None
+        assert self.migration_likelihood is not None
+        if self.migration_likelihood.__name__ == "euclidean_migration":
+            migration_scale = pyro.sample("migration_scale", dist.LogNormal(0, 4))
+
+        with pyro.plate("edges", self.parent.size(-1)):
+            batch_shape = internal_location.shape[:-2]
+            location = torch.cat(
+                [
+                    self.leaf_location.expand(batch_shape + (-1, -1)),
+                    internal_location,
+                ],
+                -2,
+            )
+            migration_scale = self.migration_likelihood(
+                self.parent, self.child, migration_scale, self.times, location, self.time_mask
+            )
+            if self.migration_likelihood.__name__ == 'marginal_euclidean_migration':
+                pyro.get_param_store()['migration_scale'] = migration_scale.data
+
+        return self.times, None, location, migration_scale
 
 
 def mean_field_location():
@@ -299,21 +390,24 @@ class ReparamLocation:
         return internal_location
 
 
-def marginal_euclidean_migration(parent, child, migration_scale, time, location):
+def marginal_euclidean_migration(parent, child, migration_scale, time, location, time_mask):
     """
     """
     gap = time[..., parent] - time[..., child]  # in units of generations
-    gap = gap.clamp(
-        min=1
-    )  # avoid incorrect ordering of parents/children due to unconstrained
-    parent_location = location.index_select(-2, parent)
+    gap = gap.clamp(min=1)  # num_edges
+    parent_location = location.index_select(-2, parent)  # num_particles num_edges 2
     child_location = location.index_select(-2, child)
-    delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)
-    migration_scale = (delta_loc_sq / gap).mean().sqrt()
+    if 1:
+        num_observed_pairs = time_mask.sum().item()
+        delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
+        migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
+    else:
+        migration_scale = torch.tensor(0.3)
+    migration_scale_gap = gap.sqrt() * migration_scale
 
     pyro.sample(
         "migration",
-        dist.Normal(parent_location, migration_scale[..., None]).to_event(1),
+        dist.Normal(parent_location, migration_scale_gap.unsqueeze(-1)).to_event(1),
         obs=child_location,
     )
 

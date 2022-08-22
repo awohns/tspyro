@@ -151,6 +151,9 @@ class CumlogsumexpUpTree(AccumulateUpTree):
     descendent is reachable along multiple paths, it will be summed multiple
     times, once per path.
     """
+    def __init__(self, ts: tskit.TreeSequence, scale_factor=1.0):
+        super().__init__(ts=ts)
+        self.scale_factor = scale_factor
 
     def _aggregate_children(self, child, parent, data, dim):
         """
@@ -166,13 +169,13 @@ class CumlogsumexpUpTree(AccumulateUpTree):
         max_child = scatter(
             child_data, parent, dim=dim, reduce="max", dim_size=data.shape[dim]
         )  # [N]
-        exp_child_data = (child_data - max_child[..., parent]).exp()  # [E]
+        exp_child_data = (self.scale_factor * (child_data - max_child[..., parent])).exp()  # [E]
         logsumexp_child = (
             max_child
             + torch.zeros_like(max_child).scatter_add(dim, parent, exp_child_data).log()
         )  # [N]
         assert logsumexp_child.shape == data.shape
-        return logsumexp_child
+        return logsumexp_child / self.scale_factor
 
 
 def radians_center_weighted(
@@ -289,6 +292,7 @@ def get_ancestral_geography(
     locations = np.zeros((ts.num_nodes, 2))
     locations[ts.samples()] = sample_locations
     fixed_nodes = set(ts.samples())
+    is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
 
     # Iterate through the nodes via groupby on parent node
     for parent_edges in edges_by_parent_asc(ts):
@@ -296,7 +300,7 @@ def get_ancestral_geography(
             parent, val = average_edges(parent_edges, locations)
             locations[parent] = val
     return torch.tensor(
-        locations[ts.num_samples :], dtype=torch.get_default_dtype()  # noqa: E203
+        locations[is_internal], dtype=torch.get_default_dtype()  # noqa: E203
     )
 
 
