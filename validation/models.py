@@ -248,7 +248,7 @@ class ConditionedTimesNaiveModel(BaseModel):
         heuristic_loc = kwargs.pop("heuristic_loc", None)
         super().__init__(*args, compute_time_prior=False, **kwargs)
         self.time_mask = time_mask
-        self.heuristic_loc = heuristic_loc
+        self.heuristic_loc = heuristic_loc.clone()
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
         self.internal_time_mask = self.internal_times > self.time_cutoff
@@ -258,7 +258,7 @@ class ConditionedTimesNaiveModel(BaseModel):
                                      dtype=torch.get_default_dtype())
 
         true_locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=torch.get_default_dtype())
-        bins = [0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0]
+        bins = [0, 10.0, 30.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0]
         print("[Empirical migration scales]")
         for left, right in zip(bins[:-1], bins[1:]):
             gap = self.times[..., self.parent] - self.times[..., self.child]  # in units of generations
@@ -388,6 +388,16 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location,
         num_observed_pairs = time_mask.sum().item()
         delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
         migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
+        migration_scale_median = (delta_loc_sq / gap)[time_mask].median().item()
+        migration_scale_mean = (delta_loc_sq / gap)[time_mask].sort()[0]
+        migration_scale_mean75 = migration_scale_mean[:int(75 * migration_scale_mean.size(0) // 100)].mean().item()
+        migration_scale_mean90 = migration_scale_mean[:int(90 * migration_scale_mean.size(0) // 100)].mean().item()
+        migration_scale_mean95 = migration_scale_mean[:int(95 * migration_scale_mean.size(0) // 100)].mean().item()
+        migration_scale_mean99 = migration_scale_mean[:int(99 * migration_scale_mean.size(0) // 100)].mean().item()
+        if torch.rand(1).item() < 0.0:
+            print("migration_scale_median", migration_scale_median)
+            print("quantiles", migration_scale_mean75, migration_scale_mean90, migration_scale_mean95, migration_scale_mean99)
+
     else:
         migration_scale = torch.tensor(0.3)
     migration_scale_gap = gap.sqrt() * migration_scale
