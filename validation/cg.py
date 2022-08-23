@@ -4,6 +4,7 @@ from tspyro.ops import get_mut_edges
 from torch_scatter import scatter
 from tspyro.ops import get_ancestral_geography
 from torch import einsum
+from torch.linalg import cholesky
 
 
 def get_metadata(ts):
@@ -29,7 +30,7 @@ class CG(object):
     def __init__(self,
                  ts,
                  time_cutoff=50.0,
-                 migration_scale=0.30,
+                 migration_scale=1.0e-4,
                  dtype=torch.float64,
                  device=torch.device('cpu')):
 
@@ -107,7 +108,7 @@ class CG(object):
         scale = (delta_loc_sq / self.edge_times)[mask].sum().item() / mask.sum().item()
         print("empirical scale", scale)
 
-        self.do_cg()
+        #self.do_cg()
 
     def do_cg(self, num_iter=30):
         r_prev = self.b - self.matmul(self.initial_loc)
@@ -167,19 +168,85 @@ class CG(object):
 
         lambda_diag_delta = (self.lambda_diag - lambda_diag2).abs().max().item()
         assert lambda_diag_delta == 0.0
+        assert self.lambda_diag[self.observed].abs().max().item() == 0.0
 
         print("lambda_diag[unobserved] min/max", self.lambda_diag[self.unobserved].min(), self.lambda_diag[self.unobserved].max())
-        self.lambda_diag += 10.1
-
-        return
+        #self.lambda_diag += 0.1
 
         #self.b = self.b[self.unobserved]
         #self.lambda_diag = self.lambda_diag[self.unobserved]
 
         #assert self.b.shape == (self.num_unobserved, 2)
         #assert self.lambda_diag.shape == (self.num_unobserved,)
+        self.compute_dense_precision()
 
     def compute_dense_precision(self):
+        lambda_prec = torch.zeros(self.num_nodes, self.num_nodes, dtype=self.dtype, device=self.device)
+        for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
+                                                        self.scaled_inv_edge_times[self.doubly_unobserved]):
+            lambda_prec[parent_idx, parent_idx] += inv_edge_time
+            lambda_prec[child_idx, child_idx] += inv_edge_time
+
+        for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
+                                                        self.scaled_inv_edge_times[self.doubly_unobserved]):
+            lambda_prec[parent_idx, child_idx] -= inv_edge_time
+            lambda_prec[child_idx, parent_idx] -= inv_edge_time
+
+        for parent_idx, inv_edge_time in zip(self.single_edges_child_parent,
+                                             self.scaled_inv_edge_times[self.singly_observed_child]):
+            lambda_prec[parent_idx, parent_idx] += inv_edge_time
+        for child_idx, inv_edge_time in zip(self.single_edges_parent_child,
+                                            self.scaled_inv_edge_times[self.singly_observed_parent]):
+            lambda_prec[child_idx, child_idx] += inv_edge_time
+
+        #lambda_prec += 1.0e-6 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
+
+        mask = (self.times < 25.0) & self.unobserved
+        L = cholesky(lambda_prec[mask][:, mask], upper=False)
+        b = self.b[mask]
+        x = torch.cholesky_solve(b, L)
+        print("x\n", x.data.cpu().numpy()[:5])
+        true = self.locations[mask]
+        print("true\n", true.data.cpu().numpy()[:5])
+        mae_heur = (true - self.initial_loc[mask]).abs().mean().item()
+        print("mae_heuristic", mae_heur)
+        mae = (true - x).abs().mean().item()
+        print("mae", mae)
+        print("x", x.shape, x.min().item(), x.max().item())
+
+        return
+
+        for cutoff in [5.0, 10.0, 20.0, 50.0]:
+            mask = (self.times < cutoff) & self.unobserved
+            _lambda_prec = lambda_prec[mask][:, mask]
+            S = torch.linalg.svdvals(_lambda_prec)
+            print("cond number[cutoff={}]".format(int(cutoff)), (S.max() / S.min()).item())
+
+        return
+
+        lambda_prec = lambda_prec[self.unobserved][:, self.unobserved]
+        S = torch.linalg.svdvals(lambda_prec)
+        print("cond number", (S.max() / S.min()).item())
+        return
+        #lambda_prec += 1.0e4 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
+        #S = torch.linalg.svdvals(lambda_prec)
+        #print("SS", S.min(), S.max())
+
+        lambda_prec += 1.0e-5 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
+        D = lambda_prec.diag().clone()
+        Dsqrt = D.sqrt()
+        lambda2 = lambda_prec / (Dsqrt * Dsqrt.unsqueeze(-1))
+        L = cholesky(lambda2, upper=False)
+        b = self.b[self.unobserved] / Dsqrt.unsqueeze(-1)
+        x = torch.cholesky_solve(b, L) / Dsqrt.unsqueeze(-1)
+        print("x", x.shape, x.min().item(), x.max().item())
+
+        lambda_max = lambda_prec.max().item()
+        L = cholesky(lambda_prec / lambda_max, upper=False)
+        b = self.b[self.unobserved] / lambda_max
+        x = torch.cholesky_solve(b, L)
+        print("x", x.shape, x.min().item(), x.max().item())
+
         pass
 
     def matmul(self, rhs):
