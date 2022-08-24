@@ -19,7 +19,7 @@ def main(args):
 
     ts = load_data(args)
 
-    CG(ts, time_cutoff=args.time_cutoff)
+    CG(ts, time_cutoff=args.time_cutoff, refill=(args.refill == 'true'))
 
 
 if __name__ == "__main__":
@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'gpu'])
     parser.add_argument('--time-cutoff', type=float, default=50.0)
+    parser.add_argument('--refill', type=str, default='true', choices=['true', 'false'])
     args = parser.parse_args()
 
     if args.device == 'gpu':
