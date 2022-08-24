@@ -19,7 +19,7 @@ def main(args):
 
     ts = load_data(args)
 
-    CG(ts, time_cutoff=args.time_cutoff, refill=(args.refill == 'true'))
+    CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy)
 
 
 if __name__ == "__main__":
@@ -27,11 +27,13 @@ if __name__ == "__main__":
 
     default_ts = 'slim_2d_continuous_recapitated_mutated.down_100_0.trees'
     default_ts = 'slim_cont_nocomp_N_2e4_Ne_8.5e3_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_79_rep_1.recap.trees'
+    default_ts = 'slim_cont_nocomp_N_2e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8e4_ancs_790_rep_1.recap.trees'
+    #default_ts = 'slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_70_rep_1.recap.trees'
 
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'gpu'])
     parser.add_argument('--time-cutoff', type=float, default=50.0)
-    parser.add_argument('--refill', type=str, default='true', choices=['true', 'false'])
+    parser.add_argument('--strategy', type=str, default='sever', choices=['sever', 'fill'])
     args = parser.parse_args()
 
     if args.device == 'gpu':
