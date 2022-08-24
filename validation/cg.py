@@ -35,7 +35,6 @@ class CG(object):
                  device=torch.device('cpu')):
 
         super().__init__()
-        print("time cutoff", time_cutoff)
         nodes = ts.tables.nodes
         edges = ts.tables.edges
         self.ts = ts
@@ -45,40 +44,46 @@ class CG(object):
         self.times = torch.as_tensor(ts.tables.nodes.time, dtype=self.dtype, device=device)
         self.parent = torch.tensor(edges.parent, dtype=torch.long, device=device)
         self.child = torch.tensor(edges.child, dtype=torch.long, device=device)
-        print("num edges", self.parent.size(0))
 
         self.observed = torch.tensor((nodes.flags & 1).astype(bool), dtype=torch.bool, device=device)
         self.unobserved = ~self.observed
         self.num_unobserved = int(self.unobserved.sum().item())
         self.num_observed = int(self.observed.sum().item())
         self.num_nodes = len(self.observed)
+        self.num_edges = self.parent.size(0)
         assert self.num_nodes == self.num_unobserved + self.num_observed
+
+        print("num edges", self.num_edges, " num nodes", self.num_nodes)
         print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
 
         self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
 
-        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy())
-        initial_loc = initial_loc.type_as(self.locations)
-        self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
+        # compute heuristic location estimates
+        self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
+        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy()).type_as(self.locations)
         self.initial_loc[self.unobserved] = initial_loc
 
+        # replace old observations with heuristic
         self.old_unobserved = (self.times > time_cutoff) & self.unobserved
-        print("self.old_unobserved", self.old_unobserved.shape, self.old_unobserved.sum().item())
+        print("Filling in {} unobserved nodes with heuristic locations".format(int(self.old_unobserved.sum().item())))
+
+        mask = (self.times <= time_cutoff) & self.unobserved
+        rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        print("rmse_heuristic", rmse_heuristic)
+
         self.observed = self.observed | self.old_unobserved
         self.unobserved = ~self.observed
         self.num_unobserved = int(self.unobserved.sum().item())
         self.num_observed = int(self.observed.sum().item())
-        self.num_nodes = len(self.observed)
         assert self.num_nodes == self.num_unobserved + self.num_observed
         print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
+
+        self.locations[self.old_unobserved] = self.initial_loc[self.old_unobserved]
 
         self.parent_observed = self.observed[self.parent]
         self.child_observed = self.observed[self.child]
         self.parent_unobserved = self.unobserved[self.parent]
         self.child_unobserved = self.unobserved[self.child]
-
-        self.unobs_idx_to_node_idx = torch.arange(self.num_nodes)[self.unobserved]
-        assert self.unobs_idx_to_node_idx.size(0) == self.num_unobserved
 
         self.doubly_unobserved = self.parent_unobserved & self.child_unobserved
         self.doubly_observed = self.parent_observed & self.child_observed
@@ -113,6 +118,10 @@ class CG(object):
         #print("initial_loc", self.initial_loc.shape, self.initial_loc.min().item(), self.initial_loc.max().item())
 
         self.prep_matrix()
+
+        self.compute_dense_precision()
+
+        return
 
         parent_location = self.locations.index_select(-2, self.parent)  # num_edges 2
         child_location = self.locations.index_select(-2, self.child)
@@ -152,7 +161,7 @@ class CG(object):
         scatter(src=src, index=self.single_edges_child_parent, dim=-2, out=self.b)
         src = locations[self.single_edges_parent_parent] * self.scaled_inv_edge_times[self.singly_observed_parent, None]
         scatter(src=src, index=self.single_edges_parent_child, dim=-2, out=self.b)
-        print("self.b min/max", self.b.min(), self.b.max())
+        #print("self.b min/max", self.b.min(), self.b.max())
 
         b2 = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
         for parent_idx, child_loc, inv_edge_time in zip(self.single_edges_child_parent,
@@ -167,6 +176,8 @@ class CG(object):
         b_delta = (self.b - b2).abs().max().item()
         assert b_delta == 0.0
         assert self.b[self.observed].abs().max().item() == 0.0
+
+        return
 
         self.lambda_diag = torch.zeros(self.num_nodes, dtype=self.dtype, device=self.device)
         src = self.scaled_inv_edge_times[self.doubly_unobserved]
@@ -212,19 +223,12 @@ class CG(object):
                                             self.scaled_inv_edge_times[self.singly_observed_parent]):
             lambda_prec[child_idx, child_idx] += inv_edge_time
 
-        #lambda_prec += 1.0e-6 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
-
         #mask = (self.times < 25.0) & self.unobserved
         mask = self.unobserved
         L = cholesky(lambda_prec[mask][:, mask], upper=False)
         b = self.b[mask]
         x = torch.cholesky_solve(b, L, upper=False)
-        #print("x\n", x.data.cpu().numpy()[:5])
-        true = self.locations[mask]
-        #print("true\n", true.data.cpu().numpy()[:5])
-        rmse_heur = (true - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
-        print("rmse_heuristic", rmse_heur)
-        rmse = (x - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        rmse = (x - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         print("rmse", rmse)
         #print("x", x.shape, x.min().item(), x.max().item())
 
@@ -260,8 +264,6 @@ class CG(object):
         b = self.b[self.unobserved] / lambda_max
         x = torch.cholesky_solve(b, L)
         print("x", x.shape, x.min().item(), x.max().item())
-
-        pass
 
     def matmul(self, rhs):
         assert rhs.shape == (self.num_nodes, 2)
