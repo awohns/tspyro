@@ -30,11 +30,12 @@ class CG(object):
     def __init__(self,
                  ts,
                  time_cutoff=50.0,
-                 migration_scale=1.0e-4,
+                 migration_scale=0.3,
                  dtype=torch.float64,
                  device=torch.device('cpu')):
 
         super().__init__()
+        print("time cutoff", time_cutoff)
         nodes = ts.tables.nodes
         edges = ts.tables.edges
         self.ts = ts
@@ -50,14 +51,26 @@ class CG(object):
         self.unobserved = ~self.observed
         self.num_unobserved = int(self.unobserved.sum().item())
         self.num_observed = int(self.observed.sum().item())
-        print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
-
-        parent_times = self.times[self.parent]
-        old_edges = parent_times > time_cutoff
-        old_parents = self.parent[old_edges]
-
         self.num_nodes = len(self.observed)
         assert self.num_nodes == self.num_unobserved + self.num_observed
+        print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
+
+        self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
+
+        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy())
+        initial_loc = initial_loc.type_as(self.locations)
+        self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
+        self.initial_loc[self.unobserved] = initial_loc
+
+        self.old_unobserved = (self.times > time_cutoff) & self.unobserved
+        print("self.old_unobserved", self.old_unobserved.shape, self.old_unobserved.sum().item())
+        self.observed = self.observed | self.old_unobserved
+        self.unobserved = ~self.observed
+        self.num_unobserved = int(self.unobserved.sum().item())
+        self.num_observed = int(self.observed.sum().item())
+        self.num_nodes = len(self.observed)
+        assert self.num_nodes == self.num_unobserved + self.num_observed
+        print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
 
         self.parent_observed = self.observed[self.parent]
         self.child_observed = self.observed[self.child]
@@ -89,15 +102,15 @@ class CG(object):
         self.edge_times = (self.times[self.parent] - self.times[self.child]).clamp(min=1.0)
         self.scaled_inv_edge_times = (self.edge_times * self.migration_scale.pow(2.0)).reciprocal()
 
-        self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
-        print("locations", self.locations.shape, self.locations[~self.locations.isnan()].min().item(),
-              self.locations[~self.locations.isnan()].max().item())
+        #self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
+        #print("locations", self.locations.shape, self.locations[~self.locations.isnan()].min().item(),
+        #      self.locations[~self.locations.isnan()].max().item())
 
-        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy())
-        initial_loc = initial_loc.type_as(self.locations)
-        self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
-        self.initial_loc[self.unobserved] = initial_loc
-        print("initial_loc", self.initial_loc.shape, self.initial_loc.min().item(), self.initial_loc.max().item())
+        #initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy())
+        #initial_loc = initial_loc.type_as(self.locations)
+        #self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
+        #self.initial_loc[self.unobserved] = initial_loc
+        #print("initial_loc", self.initial_loc.shape, self.initial_loc.min().item(), self.initial_loc.max().item())
 
         self.prep_matrix()
 
@@ -201,18 +214,19 @@ class CG(object):
 
         #lambda_prec += 1.0e-6 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
 
-        mask = (self.times < 25.0) & self.unobserved
+        #mask = (self.times < 25.0) & self.unobserved
+        mask = self.unobserved
         L = cholesky(lambda_prec[mask][:, mask], upper=False)
         b = self.b[mask]
-        x = torch.cholesky_solve(b, L)
-        print("x\n", x.data.cpu().numpy()[:5])
+        x = torch.cholesky_solve(b, L, upper=False)
+        #print("x\n", x.data.cpu().numpy()[:5])
         true = self.locations[mask]
-        print("true\n", true.data.cpu().numpy()[:5])
-        mae_heur = (true - self.initial_loc[mask]).abs().mean().item()
-        print("mae_heuristic", mae_heur)
-        mae = (true - x).abs().mean().item()
-        print("mae", mae)
-        print("x", x.shape, x.min().item(), x.max().item())
+        #print("true\n", true.data.cpu().numpy()[:5])
+        rmse_heur = (true - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        print("rmse_heuristic", rmse_heur)
+        rmse = (x - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        print("rmse", rmse)
+        #print("x", x.shape, x.min().item(), x.max().item())
 
         return
 
