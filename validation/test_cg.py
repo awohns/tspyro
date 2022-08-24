@@ -19,7 +19,7 @@ def main(args):
 
     ts = load_data(args)
 
-    cg = CG(ts, time_cutoff=args.time_cutoff)
+    CG(ts, time_cutoff=args.time_cutoff)
 
 
 if __name__ == "__main__":

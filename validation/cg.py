@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from tspyro.ops import get_mut_edges
 from torch_scatter import scatter
 from tspyro.ops import get_ancestral_geography
 from torch import einsum
@@ -68,8 +67,10 @@ class CG(object):
         print("Filling in {} unobserved nodes with heuristic locations".format(int(self.old_unobserved.sum().item())))
 
         mask = (self.times <= time_cutoff) & self.unobserved
-        rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
-        print("rmse_heuristic", rmse_heuristic)
+        mrmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).mean().sqrt().item()
+        print("rmse_heuristic:  {:.4f}".format(rmse_heuristic))
+        print("mrmse_heuristic: {:.4f}".format(mrmse_heuristic))
 
         self.observed = self.observed | self.old_unobserved
         self.unobserved = ~self.observed
@@ -223,14 +224,14 @@ class CG(object):
                                             self.scaled_inv_edge_times[self.singly_observed_parent]):
             lambda_prec[child_idx, child_idx] += inv_edge_time
 
-        #mask = (self.times < 25.0) & self.unobserved
         mask = self.unobserved
         L = cholesky(lambda_prec[mask][:, mask], upper=False)
         b = self.b[mask]
         x = torch.cholesky_solve(b, L, upper=False)
-        rmse = (x - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
-        print("rmse", rmse)
-        #print("x", x.shape, x.min().item(), x.max().item())
+        mrmse = (x - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
+        rmse = (x - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
+        print("model rmse:  {:.4f}".format(rmse))
+        print("model mrmse: {:.4f}".format(mrmse))
 
         return
 
@@ -239,31 +240,6 @@ class CG(object):
             _lambda_prec = lambda_prec[mask][:, mask]
             S = torch.linalg.svdvals(_lambda_prec)
             print("cond number[cutoff={}]".format(int(cutoff)), (S.max() / S.min()).item())
-
-        return
-
-        lambda_prec = lambda_prec[self.unobserved][:, self.unobserved]
-        S = torch.linalg.svdvals(lambda_prec)
-        print("cond number", (S.max() / S.min()).item())
-        return
-        #lambda_prec += 1.0e4 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
-        #S = torch.linalg.svdvals(lambda_prec)
-        #print("SS", S.min(), S.max())
-
-        lambda_prec += 1.0e-5 * torch.eye(lambda_prec.size(0)).type_as(lambda_prec)
-        D = lambda_prec.diag().clone()
-        Dsqrt = D.sqrt()
-        lambda2 = lambda_prec / (Dsqrt * Dsqrt.unsqueeze(-1))
-        L = cholesky(lambda2, upper=False)
-        b = self.b[self.unobserved] / Dsqrt.unsqueeze(-1)
-        x = torch.cholesky_solve(b, L) / Dsqrt.unsqueeze(-1)
-        print("x", x.shape, x.min().item(), x.max().item())
-
-        lambda_max = lambda_prec.max().item()
-        L = cholesky(lambda_prec / lambda_max, upper=False)
-        b = self.b[self.unobserved] / lambda_max
-        x = torch.cholesky_solve(b, L)
-        print("x", x.shape, x.min().item(), x.max().item())
 
     def matmul(self, rhs):
         assert rhs.shape == (self.num_nodes, 2)
