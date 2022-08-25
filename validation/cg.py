@@ -75,7 +75,8 @@ class CG(object):
 
         # define dividing temporal boundary characterized by time_cutoff
         self.old_unobserved = (self.times >= time_cutoff) & self.unobserved
-        print("Filling in {} unobserved nodes with heuristic locations".format(int(self.old_unobserved.sum().item())))
+        num_old = int(self.old_unobserved.sum().item())
+        print("Filling in {} unobserved nodes with heuristic locations".format(num_old))
 
         self.observed = self.observed | self.old_unobserved
         self.unobserved = ~self.observed
@@ -95,8 +96,6 @@ class CG(object):
             self.parent = self.parent[edges_to_keep]
             self.child = self.child[edges_to_keep]
             print("Number of edges after severing: {}".format(self.parent.size(0)))
-
-        self.compute_heuristic_metrics()
 
         self.parent_observed = self.observed[self.parent]
         self.child_observed = self.observed[self.child]
@@ -125,11 +124,7 @@ class CG(object):
         self.edge_times = (self.times[self.parent] - self.times[self.child]).clamp(min=1.0)
         self.scaled_inv_edge_times = (self.edge_times * self.migration_scale.pow(2.0)).reciprocal()
 
-        self.prep_matrix()
-
-        self.compute_dense_precision()
-
-        self.do_cg()
+        self.compute_b_lambda_diag()
 
     def compute_heuristic_metrics(self):
         mask = self.unobserved
@@ -147,17 +142,16 @@ class CG(object):
         scale = (delta_loc_sq / self.edge_times)[mask].sum().item() / mask.sum().item()
         print("empirical scale", scale)
 
-    def do_cg(self, max_num_iter=300, tol=1.0e-8):
+    def do_cg(self, max_num_iter=500, tol=1.0e-10):
         t0 = time.time()
 
-        r_prev = self.b - self.matmul(self.initial_loc)
-        p = r_prev
         x_prev = self.initial_loc
+        r_prev = self.b - self.matmul(x_prev)
+        p = r_prev
         assert r_prev[self.observed].abs().max().item() == 0.0
 
         for i in range(max_num_iter):
             Ap = self.matmul(p)
-            # assert Ap[self.observed].abs().max().item() == 0.0
             App = einsum("is,is->s", Ap, p)
             r_dot_r = einsum("is,is->s", r_prev, r_prev)
             r_dot_r_max = r_dot_r.max().item()
@@ -165,7 +159,7 @@ class CG(object):
                 print("Terminating CG early at iteration {} with r_dot_r_max = {:.2e}".format(i, r_dot_r_max))
                 break
             if i % 20 == 0:
-                print("r_dot_r[i={}] {:.2e}".format(i, r_dot_r_max))
+                print("[CG iteration {:3d}]  r_dot_r_max: {:.2e}".format(i, r_dot_r_max))
             alpha = r_dot_r / App
             x = x_prev + alpha * p
             r = r_prev - alpha * Ap
@@ -175,38 +169,58 @@ class CG(object):
 
         print("Time to do CG: {:.2f}".format(time.time() - t0))
 
-        delta = (x[self.unobserved] - self.x_cholesky).abs().max().item()
-        print("delta between x CG and x cholesky: {:.2e}".format(delta))
-
         mask = self.unobserved
         mrmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
         print("cg model rmse:   {:.4f}".format(rmse))
         print("cg model mrmse:  {:.4f}".format(mrmse))
 
-    def prep_matrix(self, test=False):
+        return x[mask]
+
+    def test_b_lambda_diag(self):
+        b = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
+        for parent_idx, child_loc, inv_edge_time in zip(self.single_edges_child_parent,
+                                                        self.locations[self.single_edges_child_child],
+                                                        self.scaled_inv_edge_times[self.singly_observed_child]):
+            b[parent_idx] += child_loc * inv_edge_time
+        for child_idx, parent_loc, inv_edge_time in zip(self.single_edges_parent_child,
+                                                        self.locations[self.single_edges_parent_parent],
+                                                        self.scaled_inv_edge_times[self.singly_observed_parent]):
+            b[child_idx] += parent_loc * inv_edge_time
+
+        b_delta = (self.b - b).abs().max().item()
+        assert b_delta == 0.0
+        assert self.b[self.observed].abs().max().item() == 0.0
+
+        lambda_diag = torch.zeros(self.num_nodes, dtype=self.dtype, device=self.device)
+        for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
+                                                        self.scaled_inv_edge_times[self.doubly_unobserved]):
+            lambda_diag[parent_idx] += inv_edge_time
+            lambda_diag[child_idx] += inv_edge_time
+
+        for parent_idx, inv_edge_time in zip(self.single_edges_child_parent,
+                                             self.scaled_inv_edge_times[self.singly_observed_child]):
+            lambda_diag[parent_idx] += inv_edge_time
+        for child_idx, inv_edge_time in zip(self.single_edges_parent_child,
+                                            self.scaled_inv_edge_times[self.singly_observed_parent]):
+            lambda_diag[child_idx] += inv_edge_time
+
+        lambda_diag_delta = (self.lambda_diag - lambda_diag).abs().max().item()
+        assert lambda_diag_delta == 0.0
+        assert self.lambda_diag[self.observed].abs().max().item() == 0.0
+
+        #print("lambda_diag[unobserved] min/max: {:.3f} / {:.3f}".format(
+            #self.lambda_diag[self.unobserved].min().item(),
+            #self.lambda_diag[self.unobserved].max().item()))
+
+    def compute_b_lambda_diag(self):
         self.b = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
-        locations = torch.nan_to_num(self.locations, nan=0.0)
+        locations = self.locations  # torch.nan_to_num(self.locations, nan=0.0)
 
         src = locations[self.single_edges_child_child] * self.scaled_inv_edge_times[self.singly_observed_child, None]
         scatter(src=src, index=self.single_edges_child_parent, dim=-2, out=self.b)
         src = locations[self.single_edges_parent_parent] * self.scaled_inv_edge_times[self.singly_observed_parent, None]
         scatter(src=src, index=self.single_edges_parent_child, dim=-2, out=self.b)
-
-        if test:
-            b2 = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
-            for parent_idx, child_loc, inv_edge_time in zip(self.single_edges_child_parent,
-                                                            locations[self.single_edges_child_child],
-                                                            self.scaled_inv_edge_times[self.singly_observed_child]):
-                b2[parent_idx] += child_loc * inv_edge_time
-            for child_idx, parent_loc, inv_edge_time in zip(self.single_edges_parent_child,
-                                                            locations[self.single_edges_parent_parent],
-                                                            self.scaled_inv_edge_times[self.singly_observed_parent]):
-                b2[child_idx] += parent_loc * inv_edge_time
-
-            b_delta = (self.b - b2).abs().max().item()
-            assert b_delta == 0.0
-            assert self.b[self.observed].abs().max().item() == 0.0
 
         self.lambda_diag = torch.zeros(self.num_nodes, dtype=self.dtype, device=self.device)
         src = self.scaled_inv_edge_times[self.doubly_unobserved]
@@ -217,28 +231,7 @@ class CG(object):
         src = self.scaled_inv_edge_times[self.singly_observed_parent]
         scatter(src=src, index=self.single_edges_parent_child, dim=-1, out=self.lambda_diag)
 
-        if test:
-            lambda_diag2 = torch.zeros(self.num_nodes, dtype=self.dtype, device=self.device)
-            for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
-                                                            self.scaled_inv_edge_times[self.doubly_unobserved]):
-                lambda_diag2[parent_idx] += inv_edge_time
-                lambda_diag2[child_idx] += inv_edge_time
-
-            for parent_idx, inv_edge_time in zip(self.single_edges_child_parent,
-                                                 self.scaled_inv_edge_times[self.singly_observed_child]):
-                lambda_diag2[parent_idx] += inv_edge_time
-            for child_idx, inv_edge_time in zip(self.single_edges_parent_child,
-                                                self.scaled_inv_edge_times[self.singly_observed_parent]):
-                lambda_diag2[child_idx] += inv_edge_time
-
-            lambda_diag_delta = (self.lambda_diag - lambda_diag2).abs().max().item()
-            assert lambda_diag_delta == 0.0
-            assert self.lambda_diag[self.observed].abs().max().item() == 0.0
-
-            print("lambda_diag[unobserved] min/max: {:.3f} / {:.3f}".format(self.lambda_diag[self.unobserved].min().item(),
-                  self.lambda_diag[self.unobserved].max().item()))
-
-    def compute_dense_precision(self):
+    def do_cholesky_inversion(self):
         lambda_prec = torch.zeros(self.num_nodes, self.num_nodes, dtype=self.dtype, device=self.device)
         for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
                                                         self.scaled_inv_edge_times[self.doubly_unobserved]):
@@ -269,17 +262,22 @@ class CG(object):
         print("cholesky model rmse:  {:.4f}".format(rmse))
         print("cholesky model mrmse: {:.4f}".format(mrmse))
 
-        self.x_cholesky = x
+        return x
 
-        return
+    def test_matmul(self, rhs):
+        result = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
+        for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
+                                                        self.scaled_inv_edge_times[self.doubly_unobserved]):
+            result[parent_idx] -= inv_edge_time * rhs[child_idx]
+            result[child_idx] -= inv_edge_time * rhs[parent_idx]
 
-        for cutoff in [5.0, 10.0, 20.0, 50.0]:
-            mask = (self.times < cutoff) & self.unobserved
-            _lambda_prec = lambda_prec[mask][:, mask]
-            S = torch.linalg.svdvals(_lambda_prec)
-            print("cond number[cutoff={}]".format(int(cutoff)), (S.max() / S.min()).item())
+        matmul_result = self.matmul(rhs)
+        assert matmul_result[self.observed].abs().max().item() == 0.0
 
-    def matmul(self, rhs, test=False):
+        delta = self.lambda_diag[:, None] * rhs + result - matmul_result
+        assert delta.abs().max().item() < 1.0e-4
+
+    def matmul(self, rhs):
         assert rhs.shape == (self.num_nodes, 2)
 
         result = self.lambda_diag[:, None] * rhs
@@ -290,18 +288,6 @@ class CG(object):
         src = -self.scaled_inv_edge_times[self.doubly_unobserved][:, None] * rhs[self.double_edges_child]
         scatter(src=src, index=self.double_edges_parent, dim=-2, out=delta_result)
 
-        if test:
-            delta_result2 = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
-            for parent_idx, child_idx, inv_edge_time in zip(self.double_edges_parent, self.double_edges_child,
-                                                            self.scaled_inv_edge_times[self.doubly_unobserved]):
-                delta_result2[parent_idx] -= inv_edge_time * rhs[child_idx]
-                delta_result2[child_idx] -= inv_edge_time * rhs[parent_idx]
-
-            delta_delta = (delta_result - delta_result2).abs().max().item()
-            #print("delta_delta", delta_delta)
-            assert delta_delta < 1.0e-5
-
         result += delta_result
-        #assert result[self.observed].abs().max().item() == 0.0
 
         return result

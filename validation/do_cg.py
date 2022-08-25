@@ -20,26 +20,21 @@ def main(args):
     ts = load_data(args)
 
     cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy)
-    cg.test_matmul(cg.b)
-    cg.test_b_lambda_diag()
-
     cg.compute_heuristic_metrics()
-
-    x_cholesky = cg.do_cholesky_inversion()
-    x_cg = cg.do_cg()
-
-    delta = (x_cg - x_cholesky).abs().max().item()
-    print("delta between x CG and x cholesky: {:.2e}".format(delta))
+    cg.do_cg()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tspyro validation')
 
-    default_ts = 'slim_2d_continuous_recapitated_mutated.down_500_0.trees'
+    default_ts = 'slim_2d_continuous_recapitated_mutated.down_100_0.trees'
+    default_ts = 'slim_cont_nocomp_N_2e4_Ne_8.5e3_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_79_rep_1.recap.trees'
+    default_ts = 'slim_cont_nocomp_N_2e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8e4_ancs_790_rep_1.recap.trees'
+    #default_ts = 'slim_cont_nocomp_N_2e4_Ne_1e4_mu_1e-8_rec_1e-8_sig_0.5_mate_0.5_maxdist_2_gens_8000_ancs_70_rep_1.recap.trees'
 
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'gpu'])
-    parser.add_argument('--time-cutoff', type=float, default=250.0)
+    parser.add_argument('--time-cutoff', type=float, default=50.0)
     parser.add_argument('--strategy', type=str, default='sever', choices=['sever', 'fill'])
     args = parser.parse_args()
 
