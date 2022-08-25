@@ -142,7 +142,7 @@ class CG(object):
         scale = (delta_loc_sq / self.edge_times)[mask].sum().item() / mask.sum().item()
         print("empirical scale", scale)
 
-    def do_cg(self, max_num_iter=500, tol=1.0e-10):
+    def do_cg(self, max_num_iter=500, tol=1.0e-5):
         t0 = time.time()
 
         x_prev = self.initial_loc
@@ -155,14 +155,15 @@ class CG(object):
             App = einsum("is,is->s", Ap, p)
             r_dot_r = einsum("is,is->s", r_prev, r_prev)
             r_dot_r_max = r_dot_r.max().item()
-            if r_dot_r_max < tol:
-                print("Terminating CG early at iteration {} with r_dot_r_max = {:.2e}".format(i, r_dot_r_max))
-                break
-            if i % 20 == 0:
-                print("[CG iteration {:3d}]  r_dot_r_max: {:.2e}".format(i, r_dot_r_max))
             alpha = r_dot_r / App
             x = x_prev + alpha * p
             r = r_prev - alpha * Ap
+            delta_x = (x - x_prev).abs().max().item()
+            if delta_x < tol:
+                print("Terminating CG early at iteration {} with delta_x = {:.2e}".format(i, delta_x))
+                break
+            if i % 20 == 0:
+                print("[CG step {:03d}]  r_dot_r_max: {:.2e}   delta_x: {:.2e}".format(i, r_dot_r_max, delta_x))
             beta = einsum("is,is->s", r, r) / r_dot_r
             p = r + beta * p
             x_prev, r_prev = x, r
