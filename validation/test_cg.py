@@ -19,7 +19,8 @@ def main(args):
 
     ts = load_data(args)
 
-    cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy)
+    device = torch.ones(1).device
+    cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy, device=device)
     cg.test_matmul(cg.b)
     cg.test_b_lambda_diag()
 

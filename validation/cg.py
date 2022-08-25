@@ -207,7 +207,7 @@ class CG(object):
             lambda_diag[child_idx] += inv_edge_time
 
         lambda_diag_delta = (self.lambda_diag - lambda_diag).abs().max().item()
-        assert lambda_diag_delta == 0.0
+        assert lambda_diag_delta < 1.0e-10
         assert self.lambda_diag[self.observed].abs().max().item() == 0.0
 
         #print("lambda_diag[unobserved] min/max: {:.3f} / {:.3f}".format(
