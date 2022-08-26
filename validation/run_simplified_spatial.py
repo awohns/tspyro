@@ -7,8 +7,8 @@ import numpy as np
 import torch
 from pyro import poutine
 
-from fit import fit_guide
-from models import euclidean_migration, marginal_euclidean_migration, ConditionedTimesNaiveModel
+from simplified_fit import fit_guide
+from models import euclidean_migration, marginal_euclidean_migration, ConditionedTimesSimplifiedModel
 from analyze import compute_baselines
 from util import get_metadata, get_time_mask
 
@@ -48,15 +48,13 @@ def main(args):
         init_times = torch.from_numpy(init_times).to(dtype=torch.get_default_dtype(), device=device)
         time_mask = get_time_mask(ts, args.time_cutoff, true_times)
 
-    migration_likelihood = poutine.mask(marginal_euclidean_migration, mask=time_mask) if 'marg' in args.migration else \
-        poutine.mask(euclidean_migration, mask=time_mask)
     leaf_locations = torch.from_numpy(locations).to(dtype=torch.get_default_dtype(), device=device)[is_leaf]
 
     inferred_times, inferred_locations, inferred_migration_scale, guide, losses, final_elbo = fit_guide(
-        ts, leaf_location=leaf_locations, migration_likelihood=migration_likelihood,
+        ts, leaf_location=leaf_locations, migration_likelihood=None,
         mutation_rate=args.mu, steps=args.num_steps, log_every=args.log_every, Ne=args.Ne,
         learning_rate=args.init_lr, milestones=milestones, seed=args.seed, gamma=args.gamma,
-        Model=ConditionedTimesNaiveModel, init_times=init_times, device=device, inference=args.inference,
+        Model=ConditionedTimesSimplifiedModel, init_times=init_times, device=device, inference=args.inference,
         gap_prefactor=args.gap_prefactor, gap_exponent=args.gap_exponent, num_particles=args.num_particles,
         time_mask=time_mask, time_cutoff=args.time_cutoff)
 
@@ -104,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--time-init', type=str, default='truth', choices=['tsdate', 'truth'])
     parser.add_argument('--inference', type=str, default='svi', choices=['svi', 'map', 'svilowrank'])
     parser.add_argument('--init-lr', type=float, default=0.1)
-    parser.add_argument('--time-cutoff', type=float, default=100.0)
+    parser.add_argument('--time-cutoff', type=float, default=500.0)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.2)
     parser.add_argument('--gap-prefactor', type=float, default=1.0)
@@ -114,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('--Ne', type=int, default=default_ne)
     parser.add_argument('--mu', type=float, default=1.0e-8)
     parser.add_argument('--num-steps', type=int, default=30 * 1000)
-    parser.add_argument('--num-particles', type=int, default=5)
+    parser.add_argument('--num-particles', type=int, default=1)
     parser.add_argument('--log-every', type=int, default=3000)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
     args = parser.parse_args()

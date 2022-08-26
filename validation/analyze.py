@@ -44,38 +44,38 @@ def compute_spatial_metrics(true_internal_locs, inferred_internal_locs, true_int
                             time_cutoff, baseline=True):
     result = {}
     not_missing = ~np.isnan(true_internal_locs)[:, 0]
-    rmse = np.sqrt(mean_squared_error(true_internal_locs[not_missing], inferred_internal_locs[not_missing]))
-    mae = np.sqrt(np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1)).mean()
+    rmse = np.sqrt(np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1).mean())
+    mrmse = np.sqrt(np.power(true_internal_locs[not_missing] - inferred_internal_locs[not_missing], 2).sum(-1)).mean()
     result['spatial_rmse'] = rmse
-    result['spatial_mae'] = mae
+    result['spatial_mrmse'] = mrmse
 
-    recent, ancient = true_internal_times <= time_cutoff, true_internal_times > time_cutoff
+    recent, ancient = true_internal_times < time_cutoff, true_internal_times >= time_cutoff
     recent, ancient = recent & not_missing, ancient & not_missing
-    rmse_ancient = np.sqrt(mean_squared_error(true_internal_locs[ancient], inferred_internal_locs[ancient]))
-    rmse_recent = np.sqrt(mean_squared_error(true_internal_locs[recent], inferred_internal_locs[recent]))
-    mae_ancient = np.sqrt(np.power(true_internal_locs[ancient] - inferred_internal_locs[ancient], 2).sum(-1)).mean()
-    mae_recent = np.sqrt(np.power(true_internal_locs[recent] - inferred_internal_locs[recent], 2).sum(-1)).mean()
+    rmse_ancient = np.sqrt(np.power(true_internal_locs[ancient] - inferred_internal_locs[ancient], 2).sum(-1).mean())
+    rmse_recent = np.sqrt(np.power(true_internal_locs[recent] - inferred_internal_locs[recent], 2).sum(-1).mean())
+    mrmse_ancient = np.sqrt(np.power(true_internal_locs[ancient] - inferred_internal_locs[ancient], 2).sum(-1)).mean()
+    mrmse_recent = np.sqrt(np.power(true_internal_locs[recent] - inferred_internal_locs[recent], 2).sum(-1)).mean()
     result['spatial_rmse_ancient'] = rmse_ancient
     result['spatial_rmse_recent'] = rmse_recent
-    result['spatial_mae_ancient'] = mae_ancient
-    result['spatial_mae_recent'] = mae_recent
+    result['spatial_mrmse_ancient'] = mrmse_ancient
+    result['spatial_mrmse_recent'] = mrmse_recent
 
     bins = np.linspace(0.0, time_cutoff, int((time_cutoff / 25.0)) + 1)
     print("bins =", bins)
-    maes = []
+    mrmses = []
     rmses = []
     for left, right in zip(bins[:-1], bins[1:]):
         mask = (true_internal_times >= left) & (true_internal_times < right) & not_missing
-        rmse = np.sqrt(mean_squared_error(true_internal_locs[mask], inferred_internal_locs[mask]))
+        rmse = np.sqrt(np.power(true_internal_locs[mask] - inferred_internal_locs[mask], 2).sum(-1).mean())
         rmses.append(rmse)
-        mae = np.sqrt(np.power(true_internal_locs[mask] - inferred_internal_locs[mask], 2).sum(-1)).mean()
-        maes.append(mae)
+        mrmse = np.sqrt(np.power(true_internal_locs[mask] - inferred_internal_locs[mask], 2).sum(-1)).mean()
+        mrmses.append(mrmse)
 
     if baseline:
-        print("baseline_maes =", maes)
+        print("baseline_mrmses =", mrmses)
         print("baseline_rmses =", rmses)
     else:
-        print("tspyro_maes =", maes)
+        print("tspyro_mrmses =", mrmses)
         print("tspyro_rmses =", rmses)
 
     return result

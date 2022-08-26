@@ -1,3 +1,5 @@
+import time
+
 import pyro
 import pyro.distributions as dist
 import torch
@@ -14,6 +16,7 @@ from tspyro.ops import (
 )
 import tsdate
 from util import get_metadata
+from tspyro.ops import get_ancestral_geography
 
 
 class BaseModel(PyroModule):
@@ -252,6 +255,137 @@ class TimeDiffModel(BaseModel):
         return time, gap, location, migration_scale
 
 
+class ConditionedTimesSimplifiedModel(torch.nn.Module):
+    def __init__(self,
+                 ts,
+                 time_cutoff=50.0,
+                 strategy='fill',
+                 dtype=torch.float64,
+                 device=torch.device('cpu')):
+
+        super().__init__()
+        nodes = ts.tables.nodes
+        edges = ts.tables.edges
+        self.ts = ts
+        self.device = device
+        self.dtype = dtype
+
+        self.strategy = strategy
+        assert strategy in ['fill', 'sever']
+
+        self.times = torch.as_tensor(ts.tables.nodes.time, dtype=self.dtype, device=device)
+        self.parent = torch.tensor(edges.parent, dtype=torch.long, device=device)
+        self.child = torch.tensor(edges.child, dtype=torch.long, device=device)
+
+        self.observed = torch.tensor((nodes.flags & 1).astype(bool), dtype=torch.bool, device=device)
+        self.unobserved = ~self.observed
+        self.num_unobserved = int(self.unobserved.sum().item())
+        self.num_observed = int(self.observed.sum().item())
+        self.num_nodes = len(self.observed)
+        self.num_edges = self.parent.size(0)
+        assert self.num_nodes == self.num_unobserved + self.num_observed
+
+        print("num edges: {}   num nodes: {}".format(self.num_edges, self.num_nodes))
+        print("num unobserved nodes: {}   num observed nodes: {}".format(self.num_unobserved, self.num_observed))
+        print("time min/max: {:.1f} / {:.1f}".format(self.times.min().item(), self.times.max().item()))
+
+        self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
+        self.nan_locations = self.locations.isnan().sum(-1) > 0
+        self.min_time_cutoff = self.times[self.nan_locations].min().item()
+        self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
+        print("Using a time cutoff of {:.1f} with {} strategy".format(self.time_cutoff, self.strategy))
+
+        # compute heuristic location estimates
+        self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
+        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy()).type_as(self.locations)
+        self.initial_loc[self.unobserved] = initial_loc
+        assert self.initial_loc.isnan().sum().item() == 0.0
+
+        # define dividing temporal boundary characterized by time_cutoff
+        self.old_unobserved = (self.times >= time_cutoff) & self.unobserved
+        num_old = int(self.old_unobserved.sum().item())
+        print("Filling in {} unobserved nodes with heuristic locations".format(num_old))
+
+        self.observed = self.observed | self.old_unobserved
+        self.unobserved = ~self.observed
+        self.num_unobserved = int(self.unobserved.sum().item())
+        self.num_observed = int(self.observed.sum().item())
+        assert self.num_nodes == self.num_unobserved + self.num_observed
+        print("num_unobserved", self.num_unobserved, "num_observed", self.num_observed)
+
+        # fill in old unobserved locations with heuristic guess (w/ old defined by time_cutoff)
+        self.locations[self.old_unobserved] = self.initial_loc[self.old_unobserved]
+        # optionally sever edges that contain old unobserved locations (w/ old defined by time_cutoff)
+        if self.strategy == 'sever':
+            old_nodes = set(torch.arange(self.num_nodes)[self.old_unobserved].tolist())
+            old_parent = torch.tensor([int(par.item()) in old_nodes for par in self.parent], dtype=torch.bool)
+            old_child = torch.tensor([int(chi.item()) in old_nodes for chi in self.child], dtype=torch.bool)
+            edges_to_keep = ~(old_parent | old_child)
+            self.parent = self.parent[edges_to_keep]
+            self.child = self.child[edges_to_keep]
+            print("Number of edges after severing: {}".format(self.parent.size(0)))
+
+        self.parent_observed = self.observed[self.parent]
+        self.child_observed = self.observed[self.child]
+        self.parent_unobserved = self.unobserved[self.parent]
+        self.child_unobserved = self.unobserved[self.child]
+
+        self.doubly_unobserved = self.parent_unobserved & self.child_unobserved
+        self.doubly_observed = self.parent_observed & self.child_observed
+        self.singly_observed_child = self.parent_unobserved & self.child_observed
+        self.singly_observed_parent = self.parent_observed & self.child_unobserved
+        print("doubly_unobserved: ", self.doubly_unobserved.sum().item(),
+              "  singly_observed: ", self.singly_observed_child.sum().item() + self.singly_observed_parent.sum().item(),
+              "  doubly_observed: ", self.doubly_observed.sum().item())
+        assert (self.doubly_unobserved + self.singly_observed_child + self.singly_observed_parent +
+                self.doubly_observed).sum().item() == self.parent.size(0)
+
+        self.double_edges_parent = self.parent[self.doubly_unobserved]
+        self.double_edges_child = self.child[self.doubly_unobserved]
+        self.single_edges_child_parent = self.parent[self.singly_observed_child]
+        self.single_edges_child_child = self.child[self.singly_observed_child]
+        self.single_edges_parent_parent = self.parent[self.singly_observed_parent]
+        self.single_edges_parent_child = self.child[self.singly_observed_parent]
+
+        self.edge_times = (self.times[self.parent] - self.times[self.child]).clamp(min=1.0)
+        self.sqrt_edge_times = self.edge_times ** 0.5
+
+        self.sqrt_edge_times_doubly_unobserved = self.sqrt_edge_times[self.doubly_unobserved]
+        self.sqrt_edge_times_singly_observed_child = self.sqrt_edge_times[self.singly_observed_child]
+        self.sqrt_edge_times_singly_observed_parent = self.sqrt_edge_times[self.singly_observed_parent]
+
+    def forward(self):
+        migration_scale = torch.tensor(0.30, dtype=self.dtype, device=self.device)
+
+        with pyro.plate("unobserved_locs", self.num_unobserved):
+            internal_locs = pyro.sample("internal_location",
+                                        dist.Normal(torch.zeros(2), torch.ones(2)).to_event(1).mask(False))
+            assert internal_locs.ndim == 2
+            locs = self.locations.clone()
+            locs[self.unobserved] = internal_locs
+
+        with pyro.plate("double_edges", self.double_edges_parent.size(0)):
+            pyro.sample("migration1",
+                dist.Normal(locs.index_select(-2, self.double_edges_parent),
+                            migration_scale * self.sqrt_edge_times_doubly_unobserved.unsqueeze(-1)).to_event(1),
+                obs=locs.index_select(-2, self.double_edges_child))
+
+        with pyro.plate("single_edges_child", self.single_edges_child_child.size(0)):
+            pyro.sample("migration2",
+                dist.Normal(locs.index_select(-2, self.single_edges_child_parent),
+                            migration_scale * self.sqrt_edge_times_singly_observed_child.unsqueeze(-1)).to_event(1),
+                obs=locs.index_select(-2, self.single_edges_child_child))
+
+        with pyro.plate("single_edges_parent", self.single_edges_parent_parent.size(0)):
+            pyro.sample("migration3",
+                dist.Normal(locs.index_select(-2, self.single_edges_parent_parent),
+                            migration_scale * self.sqrt_edge_times_singly_observed_parent.unsqueeze(-1)).to_event(1),
+                obs=locs.index_select(-2, self.single_edges_parent_child))
+
+        return self.times, None, locs, migration_scale
+
+
+
 class ConditionedTimesNaiveModel(BaseModel):
     def __init__(self, *args, **kwargs):
         self.migration_likelihood = kwargs.pop("migration_likelihood", None)
@@ -264,7 +398,7 @@ class ConditionedTimesNaiveModel(BaseModel):
         self.heuristic_loc = heuristic_loc.clone()
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
-        self.internal_time_mask = self.internal_times > self.time_cutoff
+        self.internal_time_mask = self.internal_times >= self.time_cutoff
         self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
                                           dtype=torch.get_default_dtype())
         self.times = torch.as_tensor(self.ts.tables.nodes.time,
@@ -397,7 +531,7 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location,
     gap = gap.clamp(min=1)  # num_edges
     parent_location = location.index_select(-2, parent)  # num_particles num_edges 2
     child_location = location.index_select(-2, child)
-    if 1:
+    if 0:
         num_observed_pairs = time_mask.sum().item()
         delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
         migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs

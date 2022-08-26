@@ -74,7 +74,7 @@ class CG(object):
         self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
         initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy()).type_as(self.locations)
         self.initial_loc[self.unobserved] = initial_loc
-        assert self.initial_loc.isnan().sum().item() == 0.0
+        #assert self.initial_loc.isnan().sum().item() == 0.0
 
         # define dividing temporal boundary characterized by time_cutoff
         self.old_unobserved = (self.times >= time_cutoff) & self.unobserved
@@ -128,7 +128,7 @@ class CG(object):
 
         self.migration_scale = torch.tensor(migration_scale, dtype=self.dtype, device=device)
 
-        self.edge_times = (self.times[self.parent] - self.times[self.child]).clamp(min=1.0)
+        self.edge_times = (self.times[self.parent] - self.times[self.child]).clamp(min=1.0e-6)
         self.scaled_inv_edge_times = (self.edge_times * self.migration_scale.pow(2.0)).reciprocal()
 
         self.compute_b_lambda_diag()
@@ -164,7 +164,7 @@ class CG(object):
         x_prev = self.initial_loc
         r_prev = self.b - self.matmul(x_prev)
         p = r_prev
-        assert r_prev[self.observed].abs().max().item() == 0.0
+        #assert r_prev[self.observed].abs().max().item() == 0.0
 
         for i in range(max_num_iter):
             Ap = self.matmul(p)
@@ -283,8 +283,8 @@ class CG(object):
 
         mrmse = (x - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse = (x - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
-        print("cholesky model rmse:  {:.4f}".format(rmse))
-        print("cholesky model mrmse: {:.4f}".format(mrmse))
+        print("cholesky model rmse:  {:.6f}".format(rmse))
+        print("cholesky model mrmse: {:.6f}".format(mrmse))
 
         return x
 
