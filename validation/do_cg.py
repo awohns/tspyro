@@ -21,7 +21,7 @@ def main(args):
 
     device = torch.ones(1).device
     cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy, device=device)
-    cg.compute_heuristic_metrics()
+    #cg.compute_heuristic_metrics()
     cg.do_cg()
 
 

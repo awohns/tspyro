@@ -264,7 +264,7 @@ class ConditionedTimesNaiveModel(BaseModel):
         self.heuristic_loc = heuristic_loc.clone()
         self.internal_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_internal.data.cpu().numpy()],
                                               dtype=torch.get_default_dtype())
-        self.internal_time_mask = self.internal_times > self.time_cutoff
+        self.internal_time_mask = self.internal_times >= self.time_cutoff
         self.leaf_times = torch.as_tensor(self.ts.tables.nodes.time[self.is_leaf.data.cpu().numpy()],
                                           dtype=torch.get_default_dtype())
         self.times = torch.as_tensor(self.ts.tables.nodes.time,
@@ -397,7 +397,7 @@ def marginal_euclidean_migration(parent, child, migration_scale, time, location,
     gap = gap.clamp(min=1)  # num_edges
     parent_location = location.index_select(-2, parent)  # num_particles num_edges 2
     child_location = location.index_select(-2, child)
-    if 1:
+    if 0:
         num_observed_pairs = time_mask.sum().item()
         delta_loc_sq = (parent_location - child_location).pow(2.0).mean(-1)  # num_particles num_edges
         migration_scale = ((delta_loc_sq / gap) * time_mask.type_as(gap)).sum(-1).mean(0) / num_observed_pairs
