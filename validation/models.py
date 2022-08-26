@@ -1,3 +1,5 @@
+import time
+
 import pyro
 import pyro.distributions as dist
 import torch
@@ -358,12 +360,9 @@ class ConditionedTimesSimplifiedModel(torch.nn.Module):
         with pyro.plate("unobserved_locs", self.num_unobserved):
             internal_locs = pyro.sample("internal_location",
                                         dist.Normal(torch.zeros(2), torch.ones(2)).to_event(1).mask(False))
-            if internal_locs.ndim == 2:
-                locs = torch.zeros(self.observed.size(0), 2, dtype=self.dtype, device=self.device)
-            else:
-                locs = torch.zeros(internal_locs.size(0), self.observed.size(0), 2, dtype=self.dtype, device=self.device)
-            locs[..., self.unobserved, :] = internal_locs
-            locs[..., self.observed, :] = self.locations[self.observed]
+            assert internal_locs.ndim == 2
+            locs = self.locations.clone()
+            locs[self.unobserved] = internal_locs
 
         with pyro.plate("double_edges", self.double_edges_parent.size(0)):
             pyro.sample("migration1",

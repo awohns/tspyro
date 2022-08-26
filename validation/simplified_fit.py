@@ -50,7 +50,9 @@ def fit_guide(
 
     model = Model(
         ts=tree_seq,
-        time_cutoff=time_cutoff
+        time_cutoff=time_cutoff,
+        device=torch.ones(1).device,
+        dtype=torch.ones(1).dtype
     )
     #unobserved = model.unobserved
     #heuristic_loc = get_ancestral_geography(tree_seq, leaf_location.data.cpu().numpy()).to(device=device)
@@ -107,7 +109,7 @@ def fit_guide(
     else:
         optim = MultiStepLR({'optimizer': torch.optim.Adam,
                              'optim_args': {'lr': learning_rate},
-                             'gamma': 0.2,
+                             'gamma': gamma,
                              'milestones': milestones})
 
     svi = SVI(model, guide, optim, Trace_ELBO(num_particles=num_particles,

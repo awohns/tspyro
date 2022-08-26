@@ -131,8 +131,8 @@ class CG(object):
         assert self.locations[mask].isnan().sum().item() == 0.0
         mrmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).mean().sqrt().item()
-        print("rmse_heuristic:  {:.4f}".format(rmse_heuristic))
-        print("mrmse_heuristic: {:.4f}".format(mrmse_heuristic))
+        print("rmse_heuristic:  {:.6f}".format(rmse_heuristic))
+        print("mrmse_heuristic: {:.6f}".format(mrmse_heuristic))
 
     def compute_empirical_scale(self):
         parent_location = self.locations.index_select(-2, self.parent)  # num_edges 2
@@ -173,8 +173,8 @@ class CG(object):
         mask = self.unobserved
         mrmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
-        print("cg model rmse:   {:.4f}".format(rmse))
-        print("cg model mrmse:  {:.4f}".format(mrmse))
+        print("cg model rmse:   {:.6f}".format(rmse))
+        print("cg model mrmse:  {:.6f}".format(mrmse))
 
         return x[mask]
 
@@ -260,8 +260,8 @@ class CG(object):
 
         mrmse = (x - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse = (x - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
-        print("cholesky model rmse:  {:.4f}".format(rmse))
-        print("cholesky model mrmse: {:.4f}".format(mrmse))
+        print("cholesky model rmse:  {:.6f}".format(rmse))
+        print("cholesky model mrmse: {:.6f}".format(mrmse))
 
         return x
 
