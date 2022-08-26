@@ -21,7 +21,7 @@ def main(args):
 
     device = torch.ones(1).device
     cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy, device=device)
-    #cg.compute_heuristic_metrics()
+    cg.compute_heuristic_metrics()
     cg.do_cg()
 
 
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'gpu'])
-    parser.add_argument('--time-cutoff', type=float, default=50.0)
+    parser.add_argument('--time-cutoff', type=float, default=100.0)
     parser.add_argument('--strategy', type=str, default='sever', choices=['sever', 'fill'])
     args = parser.parse_args()
 
