@@ -151,7 +151,7 @@ class CG(object):
             print("rmse_heuristic:  {:.4f}".format(rmse_heuristic))
             print("mrmse_heuristic: {:.4f}".format(mrmse_heuristic))
 
-        #bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 25.0)) + 1)
+        #bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 5.0)) + 1)
         #mrmses = []
         #for left, right in zip(bins[:-1], bins[1:]):
         #    mask = self.unobserved.data.cpu().numpy() & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
@@ -210,7 +210,7 @@ class CG(object):
         #    mask = self.unobserved & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
         #    mrmses.append( (self.locations[mask] - x[mask]).pow(2.0).sum(-1).sqrt().mean().item() )
 
-        return x[mask], mrmses
+        #return x[mask], mrmses
 
     def test_b_lambda_diag(self):
         b = torch.zeros(self.num_nodes, 2, dtype=self.dtype, device=self.device)
