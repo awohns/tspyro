@@ -37,6 +37,7 @@ class CG(object):
                  device=torch.device('cpu')):
 
         super().__init__()
+        t0 = time.time()
         nodes = ts.tables.nodes
         edges = ts.tables.edges
         self.ts = ts
@@ -65,22 +66,30 @@ class CG(object):
 
         self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
         self.nan_locations = self.locations.isnan().sum(-1) > 0
-        self.min_time_cutoff = self.times[self.nan_locations].min().item()
+        self.min_time_cutoff = self.times[self.nan_locations].min().item() if self.nan_locations.sum().item() > 0 else -1.0
         self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
         if verbose:
+            print("Total nan_locations: {}    min_nan_time: {:.2f}".format(self.nan_locations.sum().item(), self.min_time_cutoff))
             print("Using a time cutoff of {:.1f} with {} strategy".format(self.time_cutoff, self.strategy))
+            print("First half of CG init took {:.2f} seconds".format(time.time() - t0))
 
         # compute heuristic location estimates
+        t0 = time.time()
         self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
         initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy()).type_as(self.locations)
         self.initial_loc[self.unobserved] = initial_loc
-        #assert self.initial_loc.isnan().sum().item() == 0.0
+        assert self.initial_loc.isnan().sum().item() == 0.0
+        if verbose:
+            print("Computing initial_loc took {:.2f} seconds".format(time.time() - t0))
 
         # define dividing temporal boundary characterized by time_cutoff
         self.old_unobserved = (self.times >= time_cutoff) & self.unobserved
         num_old = int(self.old_unobserved.sum().item())
         if verbose:
             print("Filling in {} unobserved nodes with heuristic locations".format(num_old))
+
+        parent_unobserved = self.unobserved[self.parent]
+        child_unobserved = self.unobserved[self.child]
 
         self.observed = self.observed | self.old_unobserved
         self.unobserved = ~self.observed
@@ -94,10 +103,10 @@ class CG(object):
         self.locations[self.old_unobserved] = self.initial_loc[self.old_unobserved]
         # optionally sever edges that contain old unobserved locations (w/ old defined by time_cutoff)
         if self.strategy == 'sever':
-            old_nodes = set(torch.arange(self.num_nodes)[self.old_unobserved].tolist())
-            old_parent = torch.tensor([int(par.item()) in old_nodes for par in self.parent], dtype=torch.bool)
-            old_child = torch.tensor([int(chi.item()) in old_nodes for chi in self.child], dtype=torch.bool)
-            edges_to_keep = ~(old_parent | old_child)
+            parent_times = self.times[self.parent]
+            child_times = self.times[self.child]
+            edges_to_keep = ~(((parent_times >= time_cutoff) & parent_unobserved) | ((child_times >= time_cutoff) & child_unobserved))
+
             self.parent = self.parent[edges_to_keep]
             self.child = self.child[edges_to_keep]
             if verbose:
@@ -142,13 +151,13 @@ class CG(object):
             print("rmse_heuristic:  {:.4f}".format(rmse_heuristic))
             print("mrmse_heuristic: {:.4f}".format(mrmse_heuristic))
 
-        bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 25.0)) + 1)
-        mrmses = []
-        for left, right in zip(bins[:-1], bins[1:]):
-            mask = self.unobserved & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
-            mrmses.append( (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item() )
+        #bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 25.0)) + 1)
+        #mrmses = []
+        #for left, right in zip(bins[:-1], bins[1:]):
+        #    mask = self.unobserved.data.cpu().numpy() & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
+        #    mrmses.append( (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item() )
 
-        return mrmses
+        #return mrmses
 
     def compute_empirical_scale(self):
         parent_location = self.locations.index_select(-2, self.parent)  # num_edges 2
@@ -193,11 +202,13 @@ class CG(object):
             print("cg model rmse:   {:.4f}".format(rmse))
             print("cg model mrmse:  {:.4f}".format(mrmse))
 
-        bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 25.0)) + 1)
-        mrmses = []
-        for left, right in zip(bins[:-1], bins[1:]):
-            mask = self.unobserved & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
-            mrmses.append( (self.locations[mask] - x[mask]).pow(2.0).sum(-1).sqrt().mean().item() )
+        return x[mask]
+
+        #bins = np.linspace(0.0, self.time_cutoff, int((self.time_cutoff / 25.0)) + 1)
+        #mrmses = []
+        #for left, right in zip(bins[:-1], bins[1:]):
+        #    mask = self.unobserved & (self.times.data.cpu().numpy() >= left) & (self.times.data.cpu().numpy() < right)
+        #    mrmses.append( (self.locations[mask] - x[mask]).pow(2.0).sum(-1).sqrt().mean().item() )
 
         return x[mask], mrmses
 
