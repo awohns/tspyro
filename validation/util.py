@@ -2,6 +2,31 @@ import tskit
 import numpy as np
 import torch
 import pyslim
+import typing
+from tspyro.ops import edges_by_parent_asc, average_edges
+
+
+def get_ancestral_geography(
+    ts: tskit.TreeSequence,
+    sample_locations: np.ndarray,
+    observed: np.ndarray,
+    show_progress: typing.Optional[bool] = True
+) -> torch.Tensor:
+    locations = np.zeros((ts.num_nodes, 2))
+    #locations[ts.samples()] = sample_locations
+    locations[observed] = sample_locations[observed]
+    #fixed_nodes = set(ts.samples())
+    fixed_nodes = set(np.arange(ts.num_nodes)[observed])
+    is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
+    # Iterate through the nodes via groupby on parent node
+    for parent_edges in edges_by_parent_asc(ts):
+        if parent_edges[0] not in fixed_nodes:
+            parent, val = average_edges(parent_edges, locations)
+            locations[parent] = val
+    return torch.tensor(
+        locations, dtype=torch.get_default_dtype()  # noqa: E203
+        #locations[is_internal], dtype=torch.get_default_dtype()  # noqa: E203
+        )
 
 
 def downsample_ts(filename, num_nodes, seed):

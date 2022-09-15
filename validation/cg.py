@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch_scatter import scatter
-from tspyro.ops import get_ancestral_geography
+from util import get_ancestral_geography
 from torch import einsum
 from torch.linalg import cholesky
 import time
@@ -52,6 +52,10 @@ class CG(object):
         self.child = torch.tensor(edges.child, dtype=torch.long, device=device)
 
         self.observed = torch.tensor((nodes.flags & 1).astype(bool), dtype=torch.bool, device=device)
+        self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
+        self.nan_locations = self.locations.isnan().sum(-1) > 0
+        self.observed = (~self.nan_locations) & self.observed
+
         self.unobserved = ~self.observed
         self.num_unobserved = int(self.unobserved.sum().item())
         self.num_observed = int(self.observed.sum().item())
@@ -76,8 +80,8 @@ class CG(object):
         # compute heuristic location estimates
         t0 = time.time()
         self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
-        initial_loc = get_ancestral_geography(self.ts, self.locations[self.observed].data.cpu().numpy()).type_as(self.locations)
-        self.initial_loc[self.unobserved] = initial_loc
+        initial_loc = get_ancestral_geography(self.ts, self.locations.data.cpu().numpy(), self.observed.data.cpu().numpy()).type_as(self.locations)
+        self.initial_loc[self.unobserved] = initial_loc[self.unobserved]
         assert self.initial_loc.isnan().sum().item() == 0.0
         if verbose:
             print("Computing initial_loc took {:.2f} seconds".format(time.time() - t0))
