@@ -33,10 +33,14 @@ class CG(object):
                  migration_scale=0.3,
                  strategy='fill',
                  verbose=True,
+                 hide_fraction=0.2,
+                 seed=0,
                  dtype=torch.float64,
                  device=torch.device('cpu')):
 
         super().__init__()
+        torch.manual_seed(seed)
+
         t0 = time.time()
         nodes = ts.tables.nodes
         edges = ts.tables.edges
@@ -55,25 +59,35 @@ class CG(object):
         self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
         self.nan_locations = self.locations.isnan().sum(-1) > 0
         self.observed = (~self.nan_locations) & self.observed
-
         self.unobserved = ~self.observed
-        self.num_unobserved = int(self.unobserved.sum().item())
-        self.num_observed = int(self.observed.sum().item())
         self.num_nodes = len(self.observed)
         self.num_edges = self.parent.size(0)
+
+        targets_to_hide = torch.arange(self.num_nodes)[self.observed & (self.times <= time_cutoff)]
+        self.num_hidden = int(targets_to_hide.size(0) * hide_fraction)
+        self.hidden = targets_to_hide[torch.randperm(targets_to_hide.size(0))[:self.num_hidden]]
+        hidden_times = self.times[self.hidden]
+
+        self.observed[self.hidden] = 0
+        self.unobserved[self.hidden] = 1
+        self.num_unobserved = int(self.unobserved.sum().item())
+        self.num_observed = int(self.observed.sum().item())
+
         assert self.num_nodes == self.num_unobserved + self.num_observed
 
         if verbose:
             print("num edges: {}   num nodes: {}".format(self.num_edges, self.num_nodes))
             print("num unobserved nodes: {}   num observed nodes: {}".format(self.num_unobserved, self.num_observed))
+            print("num hidden: {}".format(self.num_hidden))
             print("time min/max: {:.1f} / {:.1f}".format(self.times.min().item(), self.times.max().item()))
 
         self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
         self.nan_locations = self.locations.isnan().sum(-1) > 0
-        self.min_time_cutoff = self.times[self.nan_locations].min().item() if self.nan_locations.sum().item() > 0 else -1.0
-        self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
+        #self.min_time_cutoff = self.times[self.nan_locations].min().item() if self.nan_locations.sum().item() > 0 else -1.0
+        #self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
+        self.time_cutoff = time_cutoff
         if verbose:
-            print("Total nan_locations: {}    min_nan_time: {:.2f}".format(self.nan_locations.sum().item(), self.min_time_cutoff))
+            #print("Total nan_locations: {}    min_nan_time: {:.2f}".format(self.nan_locations.sum().item(), self.min_time_cutoff))
             print("Using a time cutoff of {:.1f} with {} strategy".format(self.time_cutoff, self.strategy))
             print("First half of CG init took {:.2f} seconds".format(time.time() - t0))
 
@@ -147,8 +161,8 @@ class CG(object):
         self.compute_b_lambda_diag()
 
     def compute_heuristic_metrics(self, verbose=True):
-        mask = self.unobserved
-        assert self.locations[mask].isnan().sum().item() == 0.0
+        mask = self.hidden
+        #assert self.locations[mask].isnan().sum().item() == 0.0
         mrmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).mean().sqrt().item()
         if verbose:
@@ -171,7 +185,7 @@ class CG(object):
         scale = (delta_loc_sq / self.edge_times)[mask].sum().item() / mask.sum().item()
         print("empirical scale", scale)
 
-    def do_cg(self, max_num_iter=500, tol=1.0e-5, verbose=True):
+    def do_cg(self, max_num_iter=5000, tol=1.0e-5, verbose=True):
         t0 = time.time()
 
         x_prev = self.initial_loc
@@ -198,7 +212,7 @@ class CG(object):
             p = r + beta * p
             x_prev, r_prev = x, r
 
-        mask = self.unobserved
+        mask = self.hidden
         mrmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse = (x[mask] - self.locations[mask]).pow(2.0).sum(-1).mean().sqrt().item()
         if verbose:

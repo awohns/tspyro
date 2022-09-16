@@ -6,6 +6,23 @@ import typing
 from tspyro.ops import edges_by_parent_asc, average_edges
 
 
+def average_edges2(
+    parent_edges: typing.Tuple[int, typing.Iterable[tskit.Edge]],
+    locations: np.ndarray,
+) -> typing.Tuple[int, np.ndarray]:
+    parent = parent_edges[0]
+    edges = parent_edges[1]
+
+    child_lats = list()
+    child_longs = list()
+
+    for edge in edges:
+        child_lats.append(locations[edge.child][0])
+        child_longs.append(locations[edge.child][1])
+    val = np.average(np.array([child_lats, child_longs]).T, axis=0)
+    return parent, val
+
+
 def get_ancestral_geography(
     ts: tskit.TreeSequence,
     sample_locations: np.ndarray,
@@ -17,11 +34,11 @@ def get_ancestral_geography(
     locations[observed] = sample_locations[observed]
     #fixed_nodes = set(ts.samples())
     fixed_nodes = set(np.arange(ts.num_nodes)[observed])
-    is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
+    #is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
     # Iterate through the nodes via groupby on parent node
     for parent_edges in edges_by_parent_asc(ts):
         if parent_edges[0] not in fixed_nodes:
-            parent, val = average_edges(parent_edges, locations)
+            parent, val = average_edges2(parent_edges, locations)
             locations[parent] = val
     return torch.tensor(
         locations, dtype=torch.get_default_dtype()  # noqa: E203
