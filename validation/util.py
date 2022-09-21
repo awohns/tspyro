@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import pyslim
 import typing
-from tspyro.ops import edges_by_parent_asc, edges_by_child_asc
+from tspyro.ops import edges_by_parent_asc
 
 
 def average_edges(

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch_scatter import scatter
-from util import get_ancestral_geography
+from heuristic import get_ancestral_geography
 from torch import einsum
 from torch.linalg import cholesky
 import time
@@ -33,7 +33,7 @@ class CG(object):
                  migration_scale=0.3,
                  strategy='fill',
                  verbose=True,
-                 hide_fraction=0.2,
+                 hide_fraction=0.05,
                  seed=0,
                  dtype=torch.float64,
                  device=torch.device('cpu')):
@@ -72,7 +72,7 @@ class CG(object):
 
         print("Total number of observed locations: {}".format((~self.nan_locations).sum().item()))
 
-        hide = False
+        hide = True
         if hide:
             targets_to_hide = torch.arange(self.num_nodes)[self.observed & (self.times <= time_cutoff)]
             self.num_hidden = int(targets_to_hide.size(0) * hide_fraction)
@@ -81,12 +81,12 @@ class CG(object):
 
             self.observed[self.hidden] = 0
             self.unobserved[self.hidden] = 1
+            self.num_unobserved = int(self.unobserved.sum().item())
+            self.num_observed = int(self.observed.sum().item())
 
             assert self.num_nodes == self.num_unobserved + self.num_observed
             if verbose:
                 print("num hidden: {}".format(self.num_hidden))
-        self.num_unobserved = int(self.unobserved.sum().item())
-        self.num_observed = int(self.observed.sum().item())
 
         if verbose:
             print("num edges: {}   num nodes: {}".format(self.num_edges, self.num_nodes))
@@ -97,10 +97,6 @@ class CG(object):
         self.nan_locations = self.locations.isnan().sum(-1) > 0
 
         #locs = self.locations[~self.nan_locations]
-        #print("locs mean", locs.mean(dim=0))
-        #print("locs std", locs.std(dim=0))
-        #print("locs max", locs.max(dim=0).values)
-        #print("locs min", locs.min(dim=0).values)
         #self.min_time_cutoff = self.times[self.nan_locations].min().item() if self.nan_locations.sum().item() > 0 else -1.0
         #self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
         self.time_cutoff = time_cutoff
@@ -115,7 +111,7 @@ class CG(object):
         initial_loc = get_ancestral_geography(self.ts, self.locations.data.cpu().numpy(), self.observed.data.cpu().numpy()).type_as(self.locations)
         self.initial_loc[self.unobserved] = initial_loc[self.unobserved]
         print("self.initial_loc.isnan().sum().item()",self.initial_loc.isnan().sum().item())
-        #assert self.initial_loc.isnan().sum().item() == 0.0
+        assert self.initial_loc.isnan().sum().item() == 0.0
         if verbose:
             print("Computing initial_loc took {:.2f} seconds".format(time.time() - t0))
 
@@ -181,7 +177,11 @@ class CG(object):
 
     def compute_heuristic_metrics(self, verbose=True):
         mask = self.hidden
+        print("self.initial_loc[mask]\n", self.initial_loc[mask][:3])
+        print("self.locations[mask]\n", self.locations[mask][:3])
         #assert self.locations[mask].isnan().sum().item() == 0.0
+        mrmses = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().data.cpu().numpy()
+        print("mrmse quantiles: ", np.percentile(mrmses, [1.0, 10.0, 50.0, 90.0, 99.9]))
         mrmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).sqrt().mean().item()
         rmse_heuristic = (self.locations[mask] - self.initial_loc[mask]).pow(2.0).sum(-1).mean().sqrt().item()
         if verbose:

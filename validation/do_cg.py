@@ -36,12 +36,13 @@ if __name__ == "__main__":
     default_ts = 'slim_2d_cont_nocomp_N_4e3_sigma_0.5_mate_choice_0.5_max_dist_2_generations_8e3_ancients_70_rep_2.trees'
     default_ts = 'slim_2d_cont_nocomp_N_3e3_sigma_0.5_matechoice_0.5_maxdist_2_gens_8e3_len_2e8_ancs_7990_rep_2.mutated.recapitated.trees'
     default_ts = 'ancient_chr20.dates_added.simplified.dated.trees'
-    #default_ts = 'ancient_chr20.dates_added.simplified.dated.down_500_0.trees'
+    default_ts = 'ancient_chr20.dates_added.simplified.dated.down_500_0.trees'
     default_ts = 'ancient_chr20.dates_added.simplified.dated.down_50_0.trees'
+    default_ts = 'ancient_chr20.dates_added.simplified.dated.down_4000_0.trees'
 
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
-    parser.add_argument('--time-cutoff', type=float, default=200.0)
+    parser.add_argument('--time-cutoff', type=float, default=20.0)
     parser.add_argument('--strategy', type=str, default='fill', choices=['sever', 'fill'])
     args = parser.parse_args()
 
