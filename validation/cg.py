@@ -63,26 +63,44 @@ class CG(object):
         self.num_nodes = len(self.observed)
         self.num_edges = self.parent.size(0)
 
-        targets_to_hide = torch.arange(self.num_nodes)[self.observed & (self.times <= time_cutoff)]
-        self.num_hidden = int(targets_to_hide.size(0) * hide_fraction)
-        self.hidden = targets_to_hide[torch.randperm(targets_to_hide.size(0))[:self.num_hidden]]
-        hidden_times = self.times[self.hidden]
+        for cutoff in [0, 5, 10, 50, 100, 500, 5000][:0]:
+            print("# of nodes with t <= {:.1f}: {}".format(cutoff, (self.times <= cutoff).sum().item()))
 
-        self.observed[self.hidden] = 0
-        self.unobserved[self.hidden] = 1
+        for cutoff in [0, 10, 50, 100, 500, 5000][:0]:
+            n = (self.times <= cutoff) & (~self.nan_locations)
+            print("# of nodes with t <= {:.1f} and observed location: {}".format(cutoff, n.sum().item()))
+
+        print("Total number of observed locations: {}".format((~self.nan_locations).sum().item()))
+
+        hide = False
+        if hide:
+            targets_to_hide = torch.arange(self.num_nodes)[self.observed & (self.times <= time_cutoff)]
+            self.num_hidden = int(targets_to_hide.size(0) * hide_fraction)
+            self.hidden = targets_to_hide[torch.randperm(targets_to_hide.size(0))[:self.num_hidden]]
+            hidden_times = self.times[self.hidden]
+
+            self.observed[self.hidden] = 0
+            self.unobserved[self.hidden] = 1
+
+            assert self.num_nodes == self.num_unobserved + self.num_observed
+            if verbose:
+                print("num hidden: {}".format(self.num_hidden))
         self.num_unobserved = int(self.unobserved.sum().item())
         self.num_observed = int(self.observed.sum().item())
-
-        assert self.num_nodes == self.num_unobserved + self.num_observed
 
         if verbose:
             print("num edges: {}   num nodes: {}".format(self.num_edges, self.num_nodes))
             print("num unobserved nodes: {}   num observed nodes: {}".format(self.num_unobserved, self.num_observed))
-            print("num hidden: {}".format(self.num_hidden))
             print("time min/max: {:.1f} / {:.1f}".format(self.times.min().item(), self.times.max().item()))
 
         self.locations = torch.as_tensor(get_metadata(self.ts)[0], dtype=self.dtype, device=device)
         self.nan_locations = self.locations.isnan().sum(-1) > 0
+
+        #locs = self.locations[~self.nan_locations]
+        #print("locs mean", locs.mean(dim=0))
+        #print("locs std", locs.std(dim=0))
+        #print("locs max", locs.max(dim=0).values)
+        #print("locs min", locs.min(dim=0).values)
         #self.min_time_cutoff = self.times[self.nan_locations].min().item() if self.nan_locations.sum().item() > 0 else -1.0
         #self.time_cutoff = min(time_cutoff, self.min_time_cutoff)
         self.time_cutoff = time_cutoff
@@ -96,7 +114,8 @@ class CG(object):
         self.initial_loc = torch.zeros(self.num_nodes, 2, dtype=dtype, device=device)
         initial_loc = get_ancestral_geography(self.ts, self.locations.data.cpu().numpy(), self.observed.data.cpu().numpy()).type_as(self.locations)
         self.initial_loc[self.unobserved] = initial_loc[self.unobserved]
-        assert self.initial_loc.isnan().sum().item() == 0.0
+        print("self.initial_loc.isnan().sum().item()",self.initial_loc.isnan().sum().item())
+        #assert self.initial_loc.isnan().sum().item() == 0.0
         if verbose:
             print("Computing initial_loc took {:.2f} seconds".format(time.time() - t0))
 

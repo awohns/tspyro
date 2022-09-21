@@ -3,10 +3,10 @@ import numpy as np
 import torch
 import pyslim
 import typing
-from tspyro.ops import edges_by_parent_asc, average_edges
+from tspyro.ops import edges_by_parent_asc, edges_by_child_asc
 
 
-def average_edges2(
+def average_edges(
     parent_edges: typing.Tuple[int, typing.Iterable[tskit.Edge]],
     locations: np.ndarray,
 ) -> typing.Tuple[int, np.ndarray]:
@@ -17,8 +17,10 @@ def average_edges2(
     child_longs = list()
 
     for edge in edges:
-        child_lats.append(locations[edge.child][0])
-        child_longs.append(locations[edge.child][1])
+        lat, lon = locations[edge.child]
+        if not np.isnan(lat + lon):
+            child_lats.append(lat)
+            child_longs.append(lon)
     val = np.average(np.array([child_lats, child_longs]).T, axis=0)
     return parent, val
 
@@ -29,17 +31,54 @@ def get_ancestral_geography(
     observed: np.ndarray,
     show_progress: typing.Optional[bool] = True
 ) -> torch.Tensor:
-    locations = np.zeros((ts.num_nodes, 2))
+    #locations = np.full((ts.num_nodes, 2), 0.0)
+    locations = np.full((ts.num_nodes, 2), np.nan)
     #locations[ts.samples()] = sample_locations
     locations[observed] = sample_locations[observed]
     #fixed_nodes = set(ts.samples())
     fixed_nodes = set(np.arange(ts.num_nodes)[observed])
+    #for node in fixed_nodes:
+    #    if np.isnan(locations[node][0]):
+    #        print(locations[node], node)
+
     #is_internal = ~np.array((ts.tables.nodes.flags & 1).astype(bool), dtype=bool)
     # Iterate through the nodes via groupby on parent node
+    num_nans = 0
     for parent_edges in edges_by_parent_asc(ts):
         if parent_edges[0] not in fixed_nodes:
-            parent, val = average_edges2(parent_edges, locations)
+            parent, val = average_edges(parent_edges, locations)
             locations[parent] = val
+    for parent_edges in edges_by_parent_asc(ts):
+        if parent_edges[0] not in fixed_nodes:
+            parent, val = average_edges(parent_edges, locations)
+            locations[parent] = val
+            if np.isnan(val[0]):
+                num_nans +=1
+    print("num_nans",num_nans)
+    import sys; sys.exit()
+    for parent_edges in edges_by_parent_asc(ts):
+        if parent_edges[0] not in fixed_nodes:
+            parent, val = average_edges(parent_edges, locations)
+            locations[parent] = val
+            if np.isnan(val[0]):
+                print("new val", val)
+            #print('child loc', locations[list(parent_edges[1])[0].child], "new val", val)
+    import sys; sys.exit()
+    for child, edges in edges_by_child_asc(ts):
+        child_loc = locations[child]
+        if np.isnan(child_loc[0]):
+            parent_lats = list()
+            parent_longs = list()
+            for edge in edges:
+                parent_lats.append(locations[edge.parent][0])
+                parent_longs.append(locations[edge.parent][1])
+                if not np.isnan(locations[edge.parent][0]):
+                    print("locations[edge.parent][0]",locations[edge.parent][0])
+            val = np.average(np.array([parent_lats, parent_longs]).T, axis=0)
+            locations[child] = val
+            if not np.isnan(val[0]):
+                print(locations[child], " => ", val)
+
     return torch.tensor(
         locations, dtype=torch.get_default_dtype()  # noqa: E203
         #locations[is_internal], dtype=torch.get_default_dtype()  # noqa: E203

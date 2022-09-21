@@ -24,7 +24,7 @@ def main(args):
     device = torch.ones(1).device
     cg = CG(ts, time_cutoff=args.time_cutoff, strategy=args.strategy, device=device)
     cg.compute_heuristic_metrics()
-    cg.do_cg(tol=1.0e-9)
+    #cg.do_cg(tol=1.0e-9)
 
 
 if __name__ == "__main__":
@@ -37,6 +37,7 @@ if __name__ == "__main__":
     default_ts = 'slim_2d_cont_nocomp_N_3e3_sigma_0.5_matechoice_0.5_maxdist_2_gens_8e3_len_2e8_ancs_7990_rep_2.mutated.recapitated.trees'
     default_ts = 'ancient_chr20.dates_added.simplified.dated.trees'
     #default_ts = 'ancient_chr20.dates_added.simplified.dated.down_500_0.trees'
+    default_ts = 'ancient_chr20.dates_added.simplified.dated.down_50_0.trees'
 
     parser.add_argument('--ts', type=str, default=default_ts)
     parser.add_argument('--device', type=str, default='gpu', choices=['cpu', 'gpu'])
